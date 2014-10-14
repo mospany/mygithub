@@ -1172,8 +1172,17 @@ out_err:
 	#+html: </div>
 	 
 	 
-* 25章 传输控制块
+* 第25章 传输控制块
 ** 25.4 传输控制块的内存管理
 *** 25.4.4 接收缓存的分配与释放
 	书上说到设置该skb的sk宿主时TCP使用sk_stream_set_owner_r(),而到内核kernel-2.6.32中，
 	TCP和UDP统一使用skb_set_owner_r().
+	
+* 第30章 TCP的输出
+** tcp_sendmsg()
+   1. 先计算应该copy的序号与位置，设置skb->end_seq.
+      TCP_SKB_CB(skb)->end_seq += copy;
+   2. 通过调用__tcp_push_pending_frames()发送队列的段。
+	  __tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
+	  
+   
