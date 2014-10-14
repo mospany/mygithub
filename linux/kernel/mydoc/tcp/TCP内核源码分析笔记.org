@@ -1185,4 +1185,8 @@ out_err:
    2. 通过调用__tcp_push_pending_frames()发送队列的段。
 	  __tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
 	  
-   
+*** tcp_write_xmit()
+   1. 使用tcp_cwnd_test()检查拥塞窗口是否还有空间。
+   2. 使用tcp_snd_wnd_test()检查滑动窗口是否还有空间。
+   3. 使用tcp_transmit_skb()发送当前skb.
+   4. 使用tcp_event_new_data_sent()递增packets_out.
