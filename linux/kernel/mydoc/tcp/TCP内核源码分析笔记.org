@@ -1,0 +1,1179 @@
+#+TITLE: TCP内核源码分析笔记
+#+STYLE: <link rel="stylesheet" type="text/css" href="/home/mosp/.emacs.d/style/style.css" />
+#+OPTIONS: ^:{} H:5 toc:5 \n:t
+#+CATEGORIES: linux内核
+#+KEYWORDS: linux, kernel, tcp, 读书笔记， 网络管理
+# +html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+# +html: </div>
+
+* 术语
+** ABC
+   - 英文全称：Appropriate Byte Count
+   - 中文全称: 适当字节计数
+   - 功能描述: ABC是一种针对于部分确认应答的更慢地增加拥塞窗口(cwnd)的方法。
+	 可能的值为：
+	 + 0: 每一个应答增加拥塞窗口一次(无ABC)
+	 + 1: 每一个最大传输段应答增加拥塞窗口一次
+	 + 2：允许增加拥塞控制窗口两次，如果应答是为了补偿延时应答的针对两个段的应答。
+
+** SACK
+   - 英文全称: Selective Acknowledgment.
+   - 中文全称: 选择性确认
+   - 功能描述: SACK是TCP选项，它使得接收方能告诉发送方哪些报文段丢失，哪些报文段重传了，哪些报文段已经提前收到等信息。
+     根据这些信息TCP就可以只重传哪些真正丢失的报文段。需要注意的是只有收到失序的分组时才会可能会发送SACK，TCP的ACK还
+     是建立在累积确认的基础上的。也就是说如果收到的报文段与期望收到的报文段的序号相同就会发送累积的ACK，SACK只是针对
+     失序到达的报文段的。
+
+** D-SACK
+   - 英文全称: duplicate-Selective Acknowledgment.
+   - 中文全称: 重复的SACK
+   - 功能描述: RFC2883中对SACK进行了扩展。SACK中的信息描述的是收到的报文段，这些报文段可能是正常接收的，也可能是重复接收的，
+     通过对SACK进行扩展，D-SACK可以在SACK选项中描述它重复收到的报文段。但是需要注意的是D-SACK只用于报告接收端收到的最后一
+     个报文与已经接收了的报文的重复部分
+
+** FACK
+   - 英文全称: Forward Acknowledgment
+   - 中文全称: 提前确认
+   - 功能描述: FACK算法采取激进策略，将所有SACK的未确认区间当做丢失段。虽然这种策略通常带来更佳的网络性能，但是过于激进，因为SACK未确认的区间段可能只是发送了重排，而并非丢失
+
+** F-RTO
+   - 英文全称: Forward RTO Recovery
+   - 中文全称: 虚假超时
+   - 功能描述: F-RTO的基本思想是判断RTO是否正常，从而决定是否执行拥塞避免算法。方法是观察RTO之后的两个ACK。如果ACK不是冗余ACK，并且确认的包不是重传
+     的，会认为RTO是虚假的就不执行拥塞避免算法。
+
+** nagle算法
+   - 功能描述: nagle算法主要目的是减少网络流量，当你发送的数据包太小时，TCP并不立即发送该数据包，而是缓存起来直到数据包到达一定大小后才发送。
+
+** cork算法
+   - 功能描述: CORK算法的初衷：提高网络利用率，理想情况下，完全避免发送小包，仅仅发送满包以及不得不发的小包。
+	 
+	 
+** template
+   - 英文全称:
+   - 中文全称:
+   - 功能描述:
+	 
+
+* tcp_v4_connect()
+  - 描述: 建立与服务器连接，发送SYN段
+  - 返回值: 0或错误码
+  - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+    {
+        .....　     
+     	/* 设置目的地址和目标端口 */
+     	inet->dport = usin->sin_port;
+     	inet->daddr = daddr;
+        ....     
+     	/* 初始化MSS上限 */
+     	tp->rx_opt.mss_clamp = 536;
+     
+     	/* Socket identity is still unknown (sport may be zero).
+     	 * However we set state to SYN-SENT and not releasing socket
+     	 * lock select source port, enter ourselves into the hash tables and
+     	 * complete initialization after this.
+     	 */
+     	tcp_set_state(sk, TCP_SYN_SENT);/* 设置状态 */
+     	err = tcp_v4_hash_connect(sk);/* 将传输控制添加到ehash散列表中，并动态分配端口 */
+     	if (err)
+     		goto failure;
+        ....
+     	if (!tp->write_seq)/* 还未计算初始序号 */
+     		/* 根据双方地址、端口计算初始序号 */
+     		tp->write_seq = secure_tcp_sequence_number(inet->saddr,
+     							   inet->daddr,
+     							   inet->sport,
+     							   usin->sin_port);
+     
+     	/* 根据初始序号和当前时间，随机算一个初始id */
+     	inet->id = tp->write_seq ^ jiffies;
+     
+     	/* 发送SYN段 */
+     	err = tcp_connect(sk);
+     	rt = NULL;
+     	if (err)
+     		goto failure;
+     
+     	return 0;
+    }
+	#+END_SRC
+	#+html: </div>
+
+* sys_accept()
+  - 描述: 调用tcp_accept(), 并把它返回的newsk进行连接描述符分配后返回给用户空间。
+  - 返回值: 连接描述符
+  - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr, int __user *upeer_addrlen)
+    {
+     	struct socket *sock, *newsock;
+        .....     
+     	sock = sockfd_lookup(fd, &err);/* 获得侦听端口的socket */
+        .....    
+     	if (!(newsock = sock_alloc()))/* 分配一个新的套接口，用来处理与客户端的连接 */ 
+        .....     
+     	/* 调用传输层的accept，对TCP来说，是inet_accept */
+     	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
+        ....    
+     	if (upeer_sockaddr) {/* 调用者需要获取对方套接口地址和端口 */
+     		/* 调用传输层回调获得对方的地址和端口 */
+     		if(newsock->ops->getname(newsock, (struct sockaddr *)address, &len, 2)<0) {
+     		}
+     		/* 成功后复制到用户态 */
+     		err = move_addr_to_user(address, len, upeer_sockaddr, upeer_addrlen);
+     	}
+        .....     
+     	if ((err = sock_map_fd(newsock)) < 0)/* 为新连接分配文件描述符 */
+
+     	return err;
+    }
+	#+END_SRC
+	#+html: </div>
+  
+** tcp_accept()
+  *[注]*: 在内核2.6.32以后对应函数为inet_csk_accept().
+  - 描述: 通过在规定时间内，判断tcp_sock->accept_queue队列非空，代表有新的连接进入．
+  - 返回值: (struct sock *)newsk;
+  - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    struct sock *tcp_accept(struct sock *sk, int flags, int *err)
+    {
+        ....
+     	/* Find already established connection */
+     	if (!tp->accept_queue) {/* accept队列为空，说明还没有收到新连接 */
+     		long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);/* 如果套口是非阻塞的，或者在一定时间内没有新连接，则返回 */
+     
+     		if (!timeo)/* 超时时间到，没有新连接，退出 */
+     			goto out;
+     
+     		/* 运行到这里，说明有新连接到来，则等待新的传输控制块 */
+     		error = wait_for_connect(sk, timeo);
+     		if (error)
+     			goto out;
+     	}
+     
+     	req = tp->accept_queue;
+     	if ((tp->accept_queue = req->dl_next) == NULL)
+     		tp->accept_queue_tail = NULL;
+     
+     	newsk = req->sk;
+     	sk_acceptq_removed(sk);
+     	tcp_openreq_fastfree(req);
+        ....
+
+       	return newsk;
+    }
+	#+END_SRC
+	#+html: </div>
+
+* 三次握手
+** 客户端发送SYN段
+   - 由tcp_v4_connect()->tcp_connect()->tcp_transmit_skb()发送，并置为TCP_SYN_SENT.
+   - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    /* 构造并发送SYN段 */
+    int tcp_connect(struct sock *sk)
+    {
+     	struct tcp_sock *tp = tcp_sk(sk);
+     	struct sk_buff *buff;
+     
+     	tcp_connect_init(sk);/* 初始化传输控制块中与连接相关的成员 */
+     
+     	/* 为SYN段分配报文并进行初始化 */
+     	buff = alloc_skb(MAX_TCP_HEADER + 15, sk->sk_allocation);
+     	if (unlikely(buff == NULL))
+     		return -ENOBUFS;
+     
+     	/* Reserve space for headers. */
+     	skb_reserve(buff, MAX_TCP_HEADER);
+     
+     	TCP_SKB_CB(buff)->flags = TCPCB_FLAG_SYN;
+     	TCP_ECN_send_syn(sk, tp, buff);
+     	TCP_SKB_CB(buff)->sacked = 0;
+     	skb_shinfo(buff)->tso_segs = 1;
+     	skb_shinfo(buff)->tso_size = 0;
+     	buff->csum = 0;
+     	TCP_SKB_CB(buff)->seq = tp->write_seq++;
+     	TCP_SKB_CB(buff)->end_seq = tp->write_seq;
+     	tp->snd_nxt = tp->write_seq;
+     	tp->pushed_seq = tp->write_seq;
+     	tcp_ca_init(tp);
+     
+     	/* Send it off. */
+     	TCP_SKB_CB(buff)->when = tcp_time_stamp;
+     	tp->retrans_stamp = TCP_SKB_CB(buff)->when;
+     
+     	/* 将报文添加到发送队列上 */
+     	__skb_queue_tail(&sk->sk_write_queue, buff);
+     	sk_charge_skb(sk, buff);
+     	tp->packets_out += tcp_skb_pcount(buff);
+     	/* 发送SYN段 */
+     	tcp_transmit_skb(sk, skb_clone(buff, GFP_KERNEL));
+     	TCP_INC_STATS(TCP_MIB_ACTIVEOPENS);
+     
+     	/* Timer for repeating the SYN until an answer. */
+     	/* 启动重传定时器 */
+     	tcp_reset_xmit_timer(sk, TCP_TIME_RETRANS, tp->rto);
+     	return 0;
+    }
+
+	#+END_SRC
+	#+html: </div>
+	 
+** 服务端接收到SYN段后，发送SYN/ACK处理
+   - 由tcp_v4_do_rcv()->tcp_rcv_state_process()->tcp_v4_conn_request()->tcp_v4_send_synack().
+   - tcp_v4_send_synack()
+     + tcp_make_synack(sk, dst, req); /* 根据路由、传输控制块、连接请求块中的构建SYN+ACK段 */
+	 + ip_build_and_send_pkt(); /* 生成IP数据报并发送出去 */
+	#+CAPTION: 图: 服务端接收到SYN段后，发送SYN/ACK处理流程。
+    #+BEGIN_SRC dot :file tcp_synack.png :cmdline -Kdot -Tpng
+    digraph tcp_synack {
+        size = "100, 200";
+        fontname = "Microsoft YaHei"
+        node [ fontname = "Microsoft YaHei", fontsize = 12, shape = "Mrecord", color="skyblue", style="filled"]; 
+        edge [ fontname = "Microsoft YaHei", fontsize = 12, color = "darkgreen" ];
+        start [shape = "ellipse", label = "开始"];
+//        judge [shape = "diamond", label = "判断"];
+        end [shape = "octagon", label = "结束"];
+
+        do_rcv [label = "tcp_v4_do_rcv()"];
+        state_process [label = "tcp_rcv_state_process()"];
+        conn_request [label = "tcp_v4_conn_request()"];
+
+        subgraph cluster_synack {        
+            label="tcp_v4_send_synack";
+            color = "dodgerblue";
+            bgcolor="lightcyan";
+
+            make_synack [label = "tcp_make_synack()"];
+            send_pkt [label = "ip_build_and_send_pkt()"];           
+            }
+
+        start -> do_rcv;
+        do_rcv -> state_process;
+        state_process -> conn_request;
+
+        conn_request -> make_synack;
+        make_synack -> send_pkt;
+        send_pkt -> end;
+    }
+    #+END_SRC
+
+   - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    /* 向客户端发送SYN+ACK报文 */
+    static int tcp_v4_send_synack(struct sock *sk, struct open_request *req,
+     			      struct dst_entry *dst)
+    {
+     	int err = -1;
+     	struct sk_buff * skb;
+     
+     	/* First, grab a route. */
+     	/* 查找到客户端的路由 */
+     	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
+     		goto out;
+     
+     	/* 根据路由、传输控制块、连接请求块中的构建SYN+ACK段 */
+     	skb = tcp_make_synack(sk, dst, req);
+     
+     	if (skb) {/* 生成SYN+ACK段成功 */
+     		struct tcphdr *th = skb->h.th;
+     
+     		/* 生成校验码 */
+     		th->check = tcp_v4_check(th, skb->len,
+     					 req->af.v4_req.loc_addr,
+     					 req->af.v4_req.rmt_addr,
+     					 csum_partial((char *)th, skb->len,
+     						      skb->csum));
+     
+     		/* 生成IP数据报并发送出去 */
+     		err = ip_build_and_send_pkt(skb, sk, req->af.v4_req.loc_addr,
+     					    req->af.v4_req.rmt_addr,
+     					    req->af.v4_req.opt);
+     		if (err == NET_XMIT_CN)
+     			err = 0;
+     	}
+     
+    out:
+     	dst_release(dst);
+     	return err;
+    }
+   
+   	#+END_SRC
+   	#+html: </div>
+	   
+** 客户端回复确认ACK段
+   - 由tcp_v4_do_rcv()->tcp_rcv_state_process().当前客户端处于TCP_SYN_SENT状态。
+   - tcp_rcv_synsent_state_process(); /* tcp_rcv_synsent_state_process处理SYN_SENT状态下接收到的TCP段 */
+	 + tcp_ack(); /* 处理接收到的ack报文 */
+	 + tcp_send_ack(); /* 在主动连接时，向服务器端发送ACK完成连接，并更新窗口 */
+	   * alloc_skb(); /* 构造ack段 */
+	   * tcp_transmit_skb(); /* 将ack段发出 */
+     + tcp_urg(sk, skb, th); /* 处理完第二次握手后，还需要处理带外数据 */
+	 + tcp_data_snd_check(sk); /* 检测是否有数据需要发送 */
+	   * 检查sk->sk_send_head队列上是否有待发送的数据。
+	   * tcp_write_xmit(); /* 将TCP发送队列上的段发送出去 */
+  - 代码关键路径:
+*** tcp_rcv_synsent_state_process()
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+  /* 在SYN_SENT状态下处理接收到的段，但是不处理带外数据 */
+  static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
+   					 struct tcphdr *th, unsigned len)
+  {
+   	struct tcp_sock *tp = tcp_sk(sk);
+   	int saved_clamp = tp->rx_opt.mss_clamp;
+   
+   	/* 解析TCP选项并保存到传输控制块中 */
+   	tcp_parse_options(skb, &tp->rx_opt, 0);
+   
+   	if (th->ack) {/* 处理ACK标志 */
+   		/* rfc793:
+   		 * "If the state is SYN-SENT then
+   		 *    first check the ACK bit
+   		 *      If the ACK bit is set
+   		 *	  If SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send
+   		 *        a reset (unless the RST bit is set, if so drop
+   		 *        the segment and return)"
+   		 *
+   		 *  We do not send data with SYN, so that RFC-correct
+   		 *  test reduces to:
+   		 */
+   		if (TCP_SKB_CB(skb)->ack_seq != tp->snd_nxt)
+   			goto reset_and_undo;
+   
+   		if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
+   		    !between(tp->rx_opt.rcv_tsecr, tp->retrans_stamp,
+   			     tcp_time_stamp)) {
+   			NET_INC_STATS_BH(LINUX_MIB_PAWSACTIVEREJECTED);
+   			goto reset_and_undo;
+   		}
+   
+   		/* Now ACK is acceptable.
+   		 *
+   		 * "If the RST bit is set
+   		 *    If the ACK was acceptable then signal the user "error:
+   		 *    connection reset", drop the segment, enter CLOSED state,
+   		 *    delete TCB, and return."
+   		 */
+   
+   		if (th->rst) {/* 收到ACK+RST段，需要tcp_reset设置错误码，并关闭套接口 */
+   			tcp_reset(sk);
+   			goto discard;
+   		}
+   
+   		/* rfc793:
+   		 *   "fifth, if neither of the SYN or RST bits is set then
+   		 *    drop the segment and return."
+   		 *
+   		 *    See note below!
+   		 *                                        --ANK(990513)
+   		 */
+   		if (!th->syn)/* 在SYN_SENT状态下接收到的段必须存在SYN标志，否则说明接收到的段无效，丢弃该段 */
+   			goto discard_and_undo;
+   
+   		/* rfc793:
+   		 *   "If the SYN bit is on ...
+   		 *    are acceptable then ...
+   		 *    (our SYN has been ACKed), change the connection
+   		 *    state to ESTABLISHED..."
+   		 */
+   
+   		/* 从首部标志中获取显示拥塞通知的特性 */
+   		TCP_ECN_rcv_synack(tp, th);
+   		if (tp->ecn_flags&TCP_ECN_OK)/* 如果支持ECN，则设置标志 */
+   			sk->sk_no_largesend = 1;
+   
+   		/* 设置与窗口相关的成员变量 */
+   		tp->snd_wl1 = TCP_SKB_CB(skb)->seq;
+   		tcp_ack(sk, skb, FLAG_SLOWPATH);
+   
+   		/* Ok.. it's good. Set up sequence numbers and
+   		 * move to established.
+   		 */
+   		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+   		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
+   
+   		/* RFC1323: The window in SYN & SYN/ACK segments is
+   		 * never scaled.
+   		 */
+   		tp->snd_wnd = ntohs(th->window);
+   		tcp_init_wl(tp, TCP_SKB_CB(skb)->ack_seq, TCP_SKB_CB(skb)->seq);
+   
+   		if (!tp->rx_opt.wscale_ok) {
+   			tp->rx_opt.snd_wscale = tp->rx_opt.rcv_wscale = 0;
+   			tp->window_clamp = min(tp->window_clamp, 65535U);
+   		}
+   
+   		if (tp->rx_opt.saw_tstamp) {/* 根据是否支持时间戳选项来设置传输控制块的相关字段 */
+   			tp->rx_opt.tstamp_ok	   = 1;
+   			tp->tcp_header_len =
+   				sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED;
+   			tp->advmss	    -= TCPOLEN_TSTAMP_ALIGNED;
+   			tcp_store_ts_recent(tp);
+   		} else {
+   			tp->tcp_header_len = sizeof(struct tcphdr);
+   		}
+   
+   		/* 初始化PMTU、MSS等成员变量 */
+   		if (tp->rx_opt.sack_ok && sysctl_tcp_fack)
+   			tp->rx_opt.sack_ok |= 2;
+   
+   		tcp_sync_mss(sk, tp->pmtu_cookie);
+   		tcp_initialize_rcv_mss(sk);
+   
+   		/* Remember, tcp_poll() does not lock socket!
+   		 * Change state from SYN-SENT only after copied_seq
+   		 * is initialized. */
+   		tp->copied_seq = tp->rcv_nxt;
+   		mb();
+   		tcp_set_state(sk, TCP_ESTABLISHED);
+   
+   		/* Make sure socket is routed, for correct metrics.  */
+   		tp->af_specific->rebuild_header(sk);
+   
+   		tcp_init_metrics(sk);
+   
+   		/* Prevent spurious tcp_cwnd_restart() on first data
+   		 * packet.
+   		 */
+   		tp->lsndtime = tcp_time_stamp;
+   
+   		tcp_init_buffer_space(sk);
+   
+   		/* 如果启用了连接保活，则启用连接保活定时器 */
+   		if (sock_flag(sk, SOCK_KEEPOPEN))
+   			tcp_reset_keepalive_timer(sk, keepalive_time_when(tp));
+   
+   		if (!tp->rx_opt.snd_wscale)/* 首部预测 */
+   			__tcp_fast_path_on(tp, tp->snd_wnd);
+   		else
+   			tp->pred_flags = 0;
+   
+   		if (!sock_flag(sk, SOCK_DEAD)) {/* 如果套口不处于SOCK_DEAD状态，则唤醒等待该套接口的进程 */
+   			sk->sk_state_change(sk);
+   			sk_wake_async(sk, 0, POLL_OUT);
+   		}
+   
+   		/* 连接建立完成，根据情况进入延时确认模式 */
+   		if (sk->sk_write_pending || tp->defer_accept || tp->ack.pingpong) {
+   			/* Save one ACK. Data will be ready after
+   			 * several ticks, if write_pending is set.
+   			 *
+   			 * It may be deleted, but with this feature tcpdumps
+   			 * look so _wonderfully_ clever, that I was not able
+   			 * to stand against the temptation 8)     --ANK
+   			 */
+   			tcp_schedule_ack(tp);
+   			tp->ack.lrcvtime = tcp_time_stamp;
+   			tp->ack.ato	 = TCP_ATO_MIN;
+   			tcp_incr_quickack(tp);
+   			tcp_enter_quickack_mode(tp);
+   			tcp_reset_xmit_timer(sk, TCP_TIME_DACK, TCP_DELACK_MAX);
+   
+  discard:
+   			__kfree_skb(skb);
+   			return 0;
+   		} else {/* 不需要延时确认，立即发送ACK段 */
+   			tcp_send_ack(sk);
+   		}
+   		return -1;
+   	}
+   
+   	/* No ACK in the segment */
+   
+   	if (th->rst) {/* 收到RST段，则丢弃传输控制块 */
+   		/* rfc793:
+   		 * "If the RST bit is set
+   		 *
+   		 *      Otherwise (no ACK) drop the segment and return."
+   		 */
+   
+   		goto discard_and_undo;
+   	}
+   
+   	/* PAWS check. */
+   	/* PAWS检测失效，也丢弃传输控制块 */
+   	if (tp->rx_opt.ts_recent_stamp && tp->rx_opt.saw_tstamp && tcp_paws_check(&tp->rx_opt, 0))
+   		goto discard_and_undo;
+   
+   	/* 在SYN_SENT状态下收到了SYN段并且没有ACK，说明是两端同时打开 */
+   	if (th->syn) {
+   		/* We see SYN without ACK. It is attempt of
+   		 * simultaneous connect with crossed SYNs.
+   		 * Particularly, it can be connect to self.
+   		 */
+   		tcp_set_state(sk, TCP_SYN_RECV);/* 设置状态为TCP_SYN_RECV */
+   
+   		if (tp->rx_opt.saw_tstamp) {/* 设置时间戳相关的字段 */
+   			tp->rx_opt.tstamp_ok = 1;
+   			tcp_store_ts_recent(tp);
+   			tp->tcp_header_len =
+   				sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED;
+   		} else {
+   			tp->tcp_header_len = sizeof(struct tcphdr);
+   		}
+   
+   		/* 初始化窗口相关的成员变量 */
+   		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+   		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
+   
+   		/* RFC1323: The window in SYN & SYN/ACK segments is
+   		 * never scaled.
+   		 */
+   		tp->snd_wnd    = ntohs(th->window);
+   		tp->snd_wl1    = TCP_SKB_CB(skb)->seq;
+   		tp->max_window = tp->snd_wnd;
+   
+   		TCP_ECN_rcv_syn(tp, th);/* 从首部标志中获取显式拥塞通知的特性。 */
+   		if (tp->ecn_flags&TCP_ECN_OK)
+   			sk->sk_no_largesend = 1;
+   
+   		/* 初始化MSS相关的成员变量 */
+   		tcp_sync_mss(sk, tp->pmtu_cookie);
+   		tcp_initialize_rcv_mss(sk);
+   
+   		/* 向对端发送SYN+ACK段，并丢弃接收到的SYN段 */
+   		tcp_send_synack(sk);
+  #if 0
+   		/* Note, we could accept data and URG from this segment.
+   		 * There are no obstacles to make this.
+   		 *
+   		 * However, if we ignore data in ACKless segments sometimes,
+   		 * we have no reasons to accept it sometimes.
+   		 * Also, seems the code doing it in step6 of tcp_rcv_state_process
+   		 * is not flawless. So, discard packet for sanity.
+   		 * Uncomment this return to process the data.
+   		 */
+   		return -1;
+  #else
+   		goto discard;
+  #endif
+   	}
+   	/* "fifth, if neither of the SYN or RST bits is set then
+   	 * drop the segment and return."
+   	 */
+   
+  discard_and_undo:
+   	tcp_clear_options(&tp->rx_opt);
+   	tp->rx_opt.mss_clamp = saved_clamp;
+   	goto discard;
+   
+  reset_and_undo:
+   	tcp_clear_options(&tp->rx_opt);
+   	tp->rx_opt.mss_clamp = saved_clamp;
+   	return 1;
+  }
+
+	#+END_SRC
+	#+html: </div>
+		 
+** 服务端收到ACK段
+   - 由tcp_v4_do_rcv()->tcp_rcv_state_process().当前服务端处于TCP_SYN_RECV状态变为TCP_ESTABLISHED状态。
+  - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+/* 除了ESTABLISHED和TIME_WAIT状态外，其他状态下的TCP段处理都由本函数实现 */	
+int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
+			  struct tcphdr *th, unsigned len)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	int queued = 0;
+
+	tp->rx_opt.saw_tstamp = 0;
+
+	switch (sk->sk_state) {
+    .....
+	/* SYN_RECV状态的处理 */
+	if (tcp_fast_parse_options(skb, th, tp) && tp->rx_opt.saw_tstamp &&/* 解析TCP选项，如果首部中存在时间戳选项 */
+	    tcp_paws_discard(tp, skb)) {/* PAWS检测失败，则丢弃报文 */
+		if (!th->rst) {/* 如果不是RST段 */
+			/* 发送DACK给对端，说明接收到的TCP段已经处理过 */
+			NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
+			tcp_send_dupack(sk, skb);
+			goto discard;
+		}
+		/* Reset is accepted even if it did not pass PAWS. */
+	}
+
+	/* step 1: check sequence number */
+	if (!tcp_sequence(tp, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq)) {/* TCP段序号无效 */
+		if (!th->rst)/* 如果TCP段无RST标志，则发送DACK给对方 */
+			tcp_send_dupack(sk, skb);
+		goto discard;
+	}
+
+	/* step 2: check RST bit */
+	if(th->rst) {/* 如果有RST标志，则重置连接 */
+		tcp_reset(sk);
+		goto discard;
+	}
+
+	/* 如果有必要，则更新时间戳 */
+	tcp_replace_ts_recent(tp, TCP_SKB_CB(skb)->seq);
+
+	/* step 3: check security and precedence [ignored] */
+
+	/*	step 4:
+	 *
+	 *	Check for a SYN in window.
+	 */
+	if (th->syn && !before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {/* 如果有SYN标志并且序号在接收窗口内 */
+		NET_INC_STATS_BH(LINUX_MIB_TCPABORTONSYN);
+		tcp_reset(sk);/* 复位连接 */
+		return 1;
+	}
+
+	/* step 5: check the ACK field */
+	if (th->ack) {/* 如果有ACK标志 */
+		/* 检查ACK是否为正常的第三次握手 */
+		int acceptable = tcp_ack(sk, skb, FLAG_SLOWPATH);
+
+		switch(sk->sk_state) {
+		case TCP_SYN_RECV:
+			if (acceptable) {
+				tp->copied_seq = tp->rcv_nxt;
+				mb();
+				/* 正常的第三次握手，设置连接状态为TCP_ESTABLISHED */
+				tcp_set_state(sk, TCP_ESTABLISHED);
+				sk->sk_state_change(sk);
+
+				/* Note, that this wakeup is only for marginal
+				 * crossed SYN case. Passively open sockets
+				 * are not waked up, because sk->sk_sleep ==
+				 * NULL and sk->sk_socket == NULL.
+				 */
+				if (sk->sk_socket) {/* 状态已经正常，唤醒那些等待的线程 */
+					sk_wake_async(sk,0,POLL_OUT);
+				}
+
+				/* 初始化传输控制块，如果存在时间戳选项，同时平滑RTT为0，则需计算重传超时时间 */
+				tp->snd_una = TCP_SKB_CB(skb)->ack_seq;
+				tp->snd_wnd = ntohs(th->window) <<
+					      tp->rx_opt.snd_wscale;
+				tcp_init_wl(tp, TCP_SKB_CB(skb)->ack_seq,
+					    TCP_SKB_CB(skb)->seq);
+
+				/* tcp_ack considers this ACK as duplicate
+				 * and does not calculate rtt.
+				 * Fix it at least with timestamps.
+				 */
+				if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
+				    !tp->srtt)
+					tcp_ack_saw_tstamp(tp, 0);
+
+				if (tp->rx_opt.tstamp_ok)
+					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
+
+				/* Make sure socket is routed, for
+				 * correct metrics.
+				 */
+				/* 建立路由，初始化拥塞控制模块 */
+				tp->af_specific->rebuild_header(sk);
+
+				tcp_init_metrics(sk);
+
+				/* Prevent spurious tcp_cwnd_restart() on
+				 * first data packet.
+				 */
+				tp->lsndtime = tcp_time_stamp;/* 更新最近一次发送数据包的时间 */
+
+				tcp_initialize_rcv_mss(sk);
+				tcp_init_buffer_space(sk);
+				tcp_fast_path_on(tp);/* 计算有关TCP首部预测的标志 */
+			} else {
+				return 1;
+			}
+			break;
+        .....
+		}
+	} else
+		goto discard;
+    .....
+
+	/* step 6: check the URG bit */
+	tcp_urg(sk, skb, th);/* 检测带外数据位 */
+
+	/* tcp_data could move socket to TIME-WAIT */
+	if (sk->sk_state != TCP_CLOSE) {/* 如果tcp_data需要发送数据和ACK则在这里处理 */
+		tcp_data_snd_check(sk);
+		tcp_ack_snd_check(sk);
+	}
+
+	if (!queued) { /* 如果段没有加入队列，或者前面的流程需要释放报文，则释放它 */
+discard:
+		__kfree_skb(skb);
+	}
+	return 0;
+}
+	#+END_SRC
+	#+html: </div>
+
+* 数据传输
+** 客户端请求数据
+   - 由send() -> sendto() -> tcp_sendmsg().当前服务端处于TCP_ESTABLISHED状态。
+*** send()
+	 send() 直接调用了sendto().
+#	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    /*
+     *	Send a datagram down a socket.
+     */
+     
+    SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
+     		unsigned, flags)
+    {
+     	return sys_sendto(fd, buff, len, flags, NULL, 0);
+    }
+	#+END_SRC
+#	#+html: </div>
+
+	
+*** sendto()
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    /*
+     *	Send a datagram to a given address. We move the address into kernel
+     *	space and check the user space data area is readable before invoking
+     *	the protocol.
+     */
+     
+    SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
+     		unsigned, flags, struct sockaddr __user *, addr,
+     		int, addr_len)
+    {
+     	struct socket *sock;
+     	struct sockaddr_storage address;
+     	int err;
+     	struct msghdr msg;
+     	struct iovec iov;
+     	int fput_needed;
+     
+     	if (len > INT_MAX)
+     		len = INT_MAX;
+     	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+     	if (!sock)
+     		goto out;
+
+        /* 可以看出用户空间的buff直接赋给了iov.iov_base, iov.iov_len = len */     
+     	iov.iov_base = buff;
+     	iov.iov_len = len;
+     	msg.msg_name = NULL;
+     	msg.msg_iov = &iov;
+     	msg.msg_iovlen = 1;
+     	msg.msg_control = NULL;
+     	msg.msg_controllen = 0;
+     	msg.msg_namelen = 0;
+     	if (addr) {
+     		err = move_addr_to_kernel(addr, addr_len, (struct sockaddr *)&address);
+     		if (err < 0)
+     			goto out_put;
+     		msg.msg_name = (struct sockaddr *)&address;
+     		msg.msg_namelen = addr_len;
+     	}
+     	if (sock->file->f_flags & O_NONBLOCK)
+     		flags |= MSG_DONTWAIT;
+     	msg.msg_flags = flags;
+     	err = sock_sendmsg(sock, &msg, len);
+     
+    out_put:
+     	fput_light(sock->file, fput_needed);
+    out:
+     	return err;
+    }
+	#+END_SRC
+	#+html: </div>
+
+*** __sys_sendmsg()
+	关键路径：　
+	－ 通过copy_from_user把用户的struct msghdr拷贝到内核的msg_sys。
+	－ 也通过verify_iovec()把用户buff中的内容拷贝到内核的iovstack中。
+	－ 最后调用sock_sendmsg().
+	
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+static int __sys_sendmsg(struct socket *sock, struct msghdr __user *msg,
+			 struct msghdr *msg_sys, unsigned flags,
+			 struct used_address *used_address)
+{
+	struct compat_msghdr __user *msg_compat =
+	    (struct compat_msghdr __user *)msg;
+	struct sockaddr_storage address;
+	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
+	unsigned char ctl[sizeof(struct cmsghdr) + 20]
+	    __attribute__ ((aligned(sizeof(__kernel_size_t))));
+	/* 20 is size of ipv6_pktinfo */
+	unsigned char *ctl_buf = ctl;
+	int err, ctl_len, iov_size, total_len;
+
+	err = -EFAULT;
+	if (MSG_CMSG_COMPAT & flags) {
+		if (get_compat_msghdr(msg_sys, msg_compat))
+			return -EFAULT;
+	}
+	else if (copy_from_user(msg_sys, msg, sizeof(struct msghdr)))
+		return -EFAULT;
+
+	/* do not move before msg_sys is valid */
+	err = -EMSGSIZE;
+	if (msg_sys->msg_iovlen > UIO_MAXIOV)
+		goto out;
+
+	/* Check whether to allocate the iovec area */
+	err = -ENOMEM;
+	iov_size = msg_sys->msg_iovlen * sizeof(struct iovec);
+	if (msg_sys->msg_iovlen > UIO_FASTIOV) {
+		iov = sock_kmalloc(sock->sk, iov_size, GFP_KERNEL);
+		if (!iov)
+			goto out;
+	}
+
+	/* This will also move the address data into kernel space */
+	if (MSG_CMSG_COMPAT & flags) {
+		err = verify_compat_iovec(msg_sys, iov,
+					  (struct sockaddr *)&address,
+					  VERIFY_READ);
+	} else
+		err = verify_iovec(msg_sys, iov,
+				   (struct sockaddr *)&address,
+				   VERIFY_READ);
+	if (err < 0)
+		goto out_freeiov;
+	total_len = err;
+
+	err = -ENOBUFS;
+
+	if (msg_sys->msg_controllen > INT_MAX)
+		goto out_freeiov;
+	ctl_len = msg_sys->msg_controllen;
+	if ((MSG_CMSG_COMPAT & flags) && ctl_len) {
+		err =
+		    cmsghdr_from_user_compat_to_kern(msg_sys, sock->sk, ctl,
+						     sizeof(ctl));
+		if (err)
+			goto out_freeiov;
+		ctl_buf = msg_sys->msg_control;
+		ctl_len = msg_sys->msg_controllen;
+	} else if (ctl_len) {
+		if (ctl_len > sizeof(ctl)) {
+			ctl_buf = sock_kmalloc(sock->sk, ctl_len, GFP_KERNEL);
+			if (ctl_buf == NULL)
+				goto out_freeiov;
+		}
+		err = -EFAULT;
+		/*
+		 * Careful! Before this, msg_sys->msg_control contains a user pointer.
+		 * Afterwards, it will be a kernel pointer. Thus the compiler-assisted
+		 * checking falls down on this.
+		 */
+		if (copy_from_user(ctl_buf, (void __user *)msg_sys->msg_control,
+				   ctl_len))
+			goto out_freectl;
+		msg_sys->msg_control = ctl_buf;
+	}
+	msg_sys->msg_flags = flags;
+
+	if (sock->file->f_flags & O_NONBLOCK)
+		msg_sys->msg_flags |= MSG_DONTWAIT;
+	/*
+	 * If this is sendmmsg() and current destination address is same as
+	 * previously succeeded address, omit asking LSM's decision.
+	 * used_address->name_len is initialized to UINT_MAX so that the first
+	 * destination address never matches.
+	 */
+	if (used_address && used_address->name_len == msg_sys->msg_namelen &&
+	    !memcmp(&used_address->name, msg->msg_name,
+		    used_address->name_len)) {
+		err = sock_sendmsg_nosec(sock, msg_sys, total_len);
+		goto out_freectl;
+	}
+	err = sock_sendmsg(sock, msg_sys, total_len);
+	/*
+	 * If this is sendmmsg() and sending to current destination address was
+	 * successful, remember it.
+	 */
+	if (used_address && err >= 0) {
+		used_address->name_len = msg_sys->msg_namelen;
+		memcpy(&used_address->name, msg->msg_name,
+		       used_address->name_len);
+	}
+
+out_freectl:
+	if (ctl_buf != ctl)
+		sock_kfree_s(sock->sk, ctl_buf, ctl_len);
+out_freeiov:
+	if (iov != iovstack)
+		sock_kfree_s(sock->sk, iov, iov_size);
+out:
+	return err;
+}
+	
+	#+END_SRC
+	#+html: </div>
+	 
+*** tcp_sendmsg():
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+/* sendmsg系统调用在TCP层的实现 */
+int tcp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
+		size_t size)
+{
+	struct iovec *iov;
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+	int iovlen, flags;
+	int mss_now;
+	int err, copied;
+	long timeo;
+
+	/* 获取套接口的锁 */
+	lock_sock(sk);
+	TCP_CHECK_TIMER(sk);
+
+	/* 根据标志计算阻塞超时时间 */
+	flags = msg->msg_flags;
+	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
+
+	/* Wait for a connection to finish. */
+	if ((1 << sk->sk_state) & ~(TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))/* 只有这两种状态才能发送消息 */
+		if ((err = sk_stream_wait_connect(sk, &timeo)) != 0)/* 其它状态下等待连接正确建立，超时则进行错误处理 */
+			goto out_err;
+
+	/* This should be in poll */
+	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
+
+	/* 获得有效的MSS，如果支持OOB，则不能支持TSO，MSS则应当是比较小的值 */
+	mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+
+	/* Ok commence sending. */
+	/* 获取待发送数据块数及数据块指针 */
+	iovlen = msg->msg_iovlen;
+	iov = msg->msg_iov;
+	/* copied表示从用户数据块复制到skb中的字节数。 */
+	copied = 0;
+
+	err = -EPIPE;
+	/* 如果套接口存在错误，则不允许发送数据，返回EPIPE错误 */
+	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
+		goto do_error;
+
+	while (--iovlen >= 0) {/* 处理所有待发送数据块 */
+		int seglen = iov->iov_len;
+		unsigned char __user *from = iov->iov_base;
+
+		iov++;
+
+		while (seglen > 0) {/* 处理单个数据块中的所有数据 */
+			int copy;
+
+			skb = sk->sk_write_queue.prev;
+
+			if (!sk->sk_send_head ||/* 发送队列为空，前面取得的skb无效 */
+			    (copy = mss_now - skb->len) <= 0) {/* 如果skb有效，但是它已经没有多余的空间复制新数据了 */
+
+new_segment:
+				/* Allocate new segment. If the interface is SG,
+				 * allocate skb fitting to single page.
+				 */
+				if (!sk_stream_memory_free(sk))/* 发送队列中数据长度达到发送缓冲区的上限，等待缓冲区 */
+					goto wait_for_sndbuf;
+
+				skb = sk_stream_alloc_pskb(sk, select_size(sk, tp),
+							   0, sk->sk_allocation);/* 分配新的skb */
+				if (!skb)/* 分配失败，说明系统内存不足，等待 */
+					goto wait_for_memory;
+
+				/*
+				 * Check whether we can use HW checksum.
+				 */
+				if (sk->sk_route_caps &
+				    (NETIF_F_IP_CSUM | NETIF_F_NO_CSUM |
+				     NETIF_F_HW_CSUM))/* 根据路由网络设备的特性，确定是否由硬件执行校验和 */
+					skb->ip_summed = CHECKSUM_HW;
+
+				skb_entail(sk, tp, skb);/* 将SKB添加到发送队列尾部 */
+				copy = mss_now;/* 本次需要复制的数据量是MSS */
+			}
+
+			/* Try to append data to the end of skb. */
+			if (copy > seglen)/* 要复制的数据不能大于当前段的长度 */
+				copy = seglen;
+
+			/* Where to copy to? */
+			if (skb_tailroom(skb) > 0) {/* skb线性存储区底部还有空间 */
+				/* We have some space in skb head. Superb! */
+				if (copy > skb_tailroom(skb))/* 本次只复制skb存储区底部剩余空间大小的数据量 */
+					copy = skb_tailroom(skb);
+				/* 从用户空间复制指定长度的数据到skb中，如果失败，则退出 */
+				if ((err = skb_add_data(skb, from, copy)) != 0)
+					goto do_fault;
+			} else {/* 线性存储区底部已经没有空间了，复制到分散/聚集存储区中 */
+				int merge = 0;/* 是否在页中添加数据 */
+				int i = skb_shinfo(skb)->nr_frags;/* 分散/聚集片断数 */
+				struct page *page = TCP_PAGE(sk);/* 分片页页 */
+				int off = TCP_OFF(sk);/* 分片内的偏移 */
+
+				if (skb_can_coalesce(skb, i, page, off) &&
+				    off != PAGE_SIZE) {/* 当前分片还能添加数据 */
+					/* We can extend the last page
+					 * fragment. */
+					merge = 1;
+				} else if (i == MAX_SKB_FRAGS ||/* 目前skb中的页不能添加数据，这里判断是否能再分配页 */
+					   (!i &&
+					   !(sk->sk_route_caps & NETIF_F_SG))) {/* 网卡不支持S/G，不能分片 */
+					/* Need to add new fragment and cannot
+					 * do this because interface is non-SG,
+					 * or because all the page slots are
+					 * busy. */
+					tcp_mark_push(tp, skb);/* SKB可以提交了 */
+					goto new_segment;/* 重新分配skb */
+				} else if (page) {/* 分页数量未达到上限，判断当前页是否还有空间 */
+					/* If page is cached, align
+					 * offset to L1 cache boundary
+					 */
+					off = (off + L1_CACHE_BYTES - 1) &
+					      ~(L1_CACHE_BYTES - 1);
+					if (off == PAGE_SIZE) {/* 最后一个分页数据已经满，需要分配新页 */
+						put_page(page);
+						TCP_PAGE(sk) = page = NULL;
+					}
+				}
+
+				if (!page) {/* 需要分配新页 */
+					/* Allocate new cache page. */
+					if (!(page = sk_stream_alloc_page(sk)))/* 分配新页，如果内存不足则等待内存 */
+						goto wait_for_memory;
+					off = 0;
+				}
+
+				if (copy > PAGE_SIZE - off)/* 待复制的数据不能大于页中剩余空间 */
+					copy = PAGE_SIZE - off;
+
+				/* Time to copy data. We are close to
+				 * the end! */
+				err = skb_copy_to_page(sk, from, skb, page,
+						       off, copy);/* 从用户态复制数据到页中 */
+				if (err) {/* 复制失败了 */
+					/* If this page was new, give it to the
+					 * socket so it does not get leaked.
+					 */
+					if (!TCP_PAGE(sk)) {/* 如果是新分配的页，则将页记录到skb中，供今后使用 */
+						TCP_PAGE(sk) = page;
+						TCP_OFF(sk) = 0;
+					}
+					goto do_error;
+				}
+
+				/* Update the skb. */
+				/* 更新skb的分段信息 */
+				if (merge) {/* 在最后一个页中追加数据 */
+					skb_shinfo(skb)->frags[i - 1].size +=
+									copy;/* 更新最后一页的数据长度 */
+				} else {/* 新分配的页 */
+					/* 更新skb中分片信息 */
+					skb_fill_page_desc(skb, i, page, off, copy);
+					if (TCP_PAGE(sk)) {
+						get_page(page);
+					} else if (off + copy < PAGE_SIZE) {
+						get_page(page);
+						TCP_PAGE(sk) = page;
+					}
+				}
+
+				/* 更新页内偏移 */
+				TCP_OFF(sk) = off + copy;
+			}
+
+			if (!copied)/* 如果没有复制数据，则取消PSH标志 */
+				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
+
+			tp->write_seq += copy;/* 更新发送队列最后一个包的序号 */
+			TCP_SKB_CB(skb)->end_seq += copy;/* 更新skb的序号 */
+			skb_shinfo(skb)->tso_segs = 0;
+
+			/* 更新数据复制的指针 */
+			from += copy;
+			copied += copy;
+			/* 如果所有数据已经复制完毕则退出 */
+			if ((seglen -= copy) == 0 && iovlen == 0)
+				goto out;
+
+			/* 如果当前skb中的数据小于mss，说明可以往里面继续复制数据。或者发送的是OOB数据，则也跳过发送过程，继续复制数据 */
+			if (skb->len != mss_now || (flags & MSG_OOB))
+				continue;
+
+			if (forced_push(tp)) {/* 必须立即发送数据，即上次发送后产生的数据已经超过通告窗口值的一半 */
+				/* 设置PSH标志后发送数据 */
+				tcp_mark_push(tp, skb);
+				__tcp_push_pending_frames(sk, tp, mss_now, TCP_NAGLE_PUSH);
+			} else if (skb == sk->sk_send_head)/* 虽然不是必须发送数据，但是发送队列上只存在当前段，也将其发送出去 */
+				tcp_push_one(sk, mss_now);
+			continue;
+
+wait_for_sndbuf:
+			/* 由于发送队列满的原因导致等待 */
+			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+wait_for_memory:
+			if (copied)/* 虽然没有内存了，但是本次调用复制了数据到缓冲区，调用tcp_push将其发送出去 */
+				tcp_push(sk, tp, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+
+			/* 等待内存可用 */
+			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
+				goto do_error;/* 确实没有内存了，超时后返回失败 */
+
+			/* 睡眠后，MSS可能发生了变化，重新计算 */
+			mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+		}
+	}
+
+out:
+	if (copied)/* 从用户态复制了数据，发送它 */
+		tcp_push(sk, tp, flags, mss_now, tp->nonagle);
+	TCP_CHECK_TIMER(sk);
+	release_sock(sk);/* 释放锁以后返回 */
+	return copied;
+
+do_fault:
+	if (!skb->len) {/* 复制数据失败了，如果skb长度为0，说明是新分配的，释放它 */
+		if (sk->sk_send_head == skb)/* 如果skb是发送队列头，则清空队列头 */
+			sk->sk_send_head = NULL;
+		__skb_unlink(skb, skb->list);
+		sk_stream_free_skb(sk, skb);/* 释放skb */
+	}
+
+do_error:
+	if (copied)
+		goto out;
+out_err:
+	err = sk_stream_error(sk, flags, err);
+	TCP_CHECK_TIMER(sk);
+	release_sock(sk);
+	return err;
+}
+	#+END_SRC
+	#+html: </div>
+
+	
+
+** 服务端响应请求
+   - 由tcp_v4_do_rcv()->tcp_rcv_established().当前服务端处于TCP_ESTABLISHED状态。
+   - 代码关键路径:
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    
+	#+END_SRC
+	#+html: </div>
+	 
+	 
+* 25章 传输控制块
+** 25.4 传输控制块的内存管理
+*** 25.4.4 接收缓存的分配与释放
+	书上说到设置该skb的sk宿主时TCP使用sk_stream_set_owner_r(),而到内核kernel-2.6.32中，
+	TCP和UDP统一使用skb_set_owner_r().
