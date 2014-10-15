@@ -1177,6 +1177,33 @@ out_err:
 *** 25.4.4 接收缓存的分配与释放
 	书上说到设置该skb的sk宿主时TCP使用sk_stream_set_owner_r(),而到内核kernel-2.6.32中，
 	TCP和UDP统一使用skb_set_owner_r().
+
+* 第29章 拥塞控制
+** 拥塞状态
+ 1. TCP_CA_Open 
+    这个状态是也就是初始状态，我们可以看到在tcp_create_openreq_child(这个函数的意思可以看我前面的blog)中，
+    当我们new一个新的socket之后就会设置这个socket的状态为TCP_CA_Open。这个也可以说是fast path。 
+
+ 2. TCP_CA_Disorder 
+    当发送者检测到重复的ack或者sack就进入这个状态。在这个状态，拥塞窗口不会被调整，但是这个状态下的话，
+    每一次新的输入数据包都会触发一个新的端的传输。 
+
+ 3. TCP_CA_CWR 
+    这个状态叫做 (Congestion Window Reduced),顾名思义，也就是当拥塞窗口减小的时候会进入这个状态。
+    比如当发送者收到一个ECN，此时就需要减小窗口。这个状态能够被Recovery or Loss 所打断。当接收到一个拥塞提醒的时候，
+    发送者是每接收到一个ack，就减小拥塞窗口一个段，直到窗口大小减半。因此可以这么说当发送者正在减小窗口并且没有任何重传段的时候，
+    就会处于CWR状态。 
+
+ 4. TCP_CA_Recovery 
+    当足够数量的(一般是3个)的连续的重复ack到达发送端，则发送端立即重传第一个没有被ack的数据段，然后进入这个状态。
+    处于这个状态的时候，发送者也是和CWR状态类似，每次接收到ack后减小窗口。在这个状态，拥塞窗口不会增长，发送者要么重传标记lost的段，
+    要么传输新的段。当发送者进入这个状态时的没有被ack的段全部ack之后就离开这个状态。 
+
+ 5. TCP_CA_Loss 
+    当RTO超时后，发送者就进入这个状态。此时所有的没有被ack的段都标记为loss，然后降低窗口大小为1,然后进入慢开始阶段。
+    loss状态不能被其他状态所中断。而这个状态的退出只有当进入loss时，所有的被标记为loss的段都得到ack后，才会再次返回open状态。
+
+	
 	
 * 第30章 TCP的输出
 ** tcp_sendmsg()
@@ -1190,3 +1217,5 @@ out_err:
    2. 使用tcp_snd_wnd_test()检查滑动窗口是否还有空间。
    3. 使用tcp_transmit_skb()发送当前skb.
    4. 使用tcp_event_new_data_sent()递增packets_out.
+
+	  
