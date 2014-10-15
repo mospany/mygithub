@@ -1202,7 +1202,40 @@ out_err:
  5. TCP_CA_Loss 
     当RTO超时后，发送者就进入这个状态。此时所有的没有被ack的段都标记为loss，然后降低窗口大小为1,然后进入慢开始阶段。
     loss状态不能被其他状态所中断。而这个状态的退出只有当进入loss时，所有的被标记为loss的段都得到ack后，才会再次返回open状态。
+** cwnd初始值
+   - 客户端初始化是在发送syn包后接收到syn/ack包时处于SYN_SENT状态下进行初始化的。
+	 tcp_rcv_synsent_state_process[5472] tcp_init_metrics(sk);
+   - 服务端初始化是在接收到syn包处于SYN_RECV状态下初始化的。
+　　　tcp_rcv_state_process[5713]    tcp_init_metrics(sk);　　
+   - tcp_init_metrics()调用tcp_init_cwnd().
+     tp->snd_cwnd = tcp_init_cwnd(tp, dst);
+   - tcp_init_cwnd()里实现取路由里设置的cwnd，TCP_INIT_CWND与tp->snd_cwnd_clamp取最小值。
+	 	#+BEGIN_SRC c -n
+       __u32 tcp_init_cwnd(struct tcp_sock *tp, struct dst_entry *dst)
+       {
+        	__u32 cwnd = (dst ? dst_metric(dst, RTAX_INITCWND) : 0);
+        
+        	if (!cwnd)
+        		cwnd = TCP_INIT_CWND;
+        	return min_t(__u32, cwnd, tp->snd_cwnd_clamp);
+       }
+	 	#+END_SRC
+	 [注]: 目前centos 6.2里kernel-2.6.32的TCP_INIT_CWND值为10.
+     -------------------------------------------------------------------------------
+     *** include/net/tcp.h:
+     TCP_INIT_CWND[203]             #define TCP_INIT_CWND 10
+     -------------------------------------------------------------------------------
+	 + tp->snd_cwnd_clamp为允许的最大拥塞窗口值，初始值为65535。
+	   它通过tcp_v4_init_sock()里调用:
+	   	tp->snd_cwnd_clamp = ~0;
+	   实现，其类型为u16.
 
+   -------------------------------------------------------------------------------
+   *** net/ipv4/tcp_input.c:
+   tcp_rcv_synsent_state_process[5472] tcp_init_metrics(sk);
+   tcp_rcv_state_process[5713]    tcp_init_metrics(sk);
+   -------------------------------------------------------------------------------
+   
 	
 	
 * 第30章 TCP的输出
