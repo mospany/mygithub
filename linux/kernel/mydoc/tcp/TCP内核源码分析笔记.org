@@ -1298,7 +1298,61 @@ out_err:
 	
     然后是slow start的处理,这里有关abc的处理，注释都很详细了，这里就不解释了，我们主要看abc关闭的部分。这里使用cnt，也是主要为了打开abc之后的slow start。
     这是abc（Appropriate Byte Counting）相关的rfc：
-	
+
+*** snd_cwnd_clamp设置
+    关于snd_cwnd_clamp变量，在《linux内核源码剖析——TCP/IP实现（下册）》p717，讲到：snd_cwnd_clamp是允许的拥塞窗口最大值，初始值为65535，之后再接收SYN和ACK段时，
+	会根据条件确定是否从路由配置项读取信息更新该字段，最后在TCP连接复位前，将更新后的值根据某种算法计算后再更新回相对应的路由配置项中，便于连接使用。
+
+**** 连接复位前更新
+	- 客户端
+	  + 调用关系：
+	  + 更新时机： tcp_update_metrics().
+      *** net/ipv4/tcp_minisocks.c:
+      tcp_time_wait[357]             tcp_update_metrics(sk);
+	- 服务端
+	  + 调用关系：
+	  + 更新时机：
+      *** net/ipv4/tcp_input.c:
+      tcp_rcv_state_process[5779]    tcp_update_metrics(sk);
+	  
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    void tcp_update_metrics(struct sock *sk)
+    {
+    ......
+     		if (tcp_in_initial_slowstart(tp)) {
+     			/* Slow start still did not finish. */
+     			if (dst_metric(dst, RTAX_SSTHRESH) &&
+     			    !dst_metric_locked(dst, RTAX_SSTHRESH) &&
+     			    (tp->snd_cwnd >> 1) > dst_metric(dst, RTAX_SSTHRESH))
+     				dst->metrics[RTAX_SSTHRESH-1] = tp->snd_cwnd >> 1;
+     			if (!dst_metric_locked(dst, RTAX_CWND) &&
+     			    tp->snd_cwnd > dst_metric(dst, RTAX_CWND))
+     				dst->metrics[RTAX_CWND - 1] = tp->snd_cwnd;
+     		} else if (tp->snd_cwnd > tp->snd_ssthresh &&
+     			   icsk->icsk_ca_state == TCP_CA_Open) {
+     			/* Cong. avoidance phase, cwnd is reliable. */
+     			if (!dst_metric_locked(dst, RTAX_SSTHRESH))
+     				dst->metrics[RTAX_SSTHRESH-1] =
+     					max(tp->snd_cwnd >> 1, tp->snd_ssthresh);
+     			if (!dst_metric_locked(dst, RTAX_CWND))
+     				dst->metrics[RTAX_CWND-1] = (dst_metric(dst, RTAX_CWND) + tp->snd_cwnd) >> 1;
+     		} else {
+     			/* Else slow start did not finish, cwnd is non-sense,
+     			   ssthresh may be also invalid.
+     			 */
+     			if (!dst_metric_locked(dst, RTAX_CWND))
+     				dst->metrics[RTAX_CWND-1] = (dst_metric(dst, RTAX_CWND) + tp->snd_ssthresh) >> 1;
+     			if (dst_metric(dst, RTAX_SSTHRESH) &&
+     			    !dst_metric_locked(dst, RTAX_SSTHRESH) &&
+     			    tp->snd_ssthresh > dst_metric(dst, RTAX_SSTHRESH))
+     				dst->metrics[RTAX_SSTHRESH-1] = tp->snd_ssthresh;
+     		}
+    ......		
+    }		
+   	#+END_SRC
+	#+html: </div>
+     
 	
 *** 拥塞控制实现
 	 	#+BEGIN_SRC c -n
@@ -1370,7 +1424,26 @@ out_err:
     这里着重解释一下，cwnd的指数增长是如何进行的，所有的文献中都会提到，cwnd在一个RTT内会翻倍，这里看到的源码似乎不是这样，而是接收一个ACK就加一。
 	这里疑惑了一下，接收一个ACK的时间不就是RTT吗？其实不是的，一个cwnd内的包是一起发送的，之间相关的时间很短，只和带宽有关，ACK也是连续返回的，
 	一个cwnd内的所有ACK都返回了才算是一个RTT。每返回一个ACK，cwnd就加一，那等所有ACK都返回了，cwnd也就翻倍了。
-   
+
+** 拥塞避免
+*** 拥塞避免算法
+	通过判断当前的拥塞窗口下已经发送的数据段的个数是否大于算法计算出来的值w，如果大于我们才能增加拥塞窗口值，否则之需要增加snd_cwnd_cnt。
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    void tcp_cong_avoid_ai(struct tcp_sock *tp, u32 w)
+    {
+    //判断是否大于我们的标记值
+        if (tp->snd_cwnd_cnt >= w) {
+            if (tp->snd_cwnd < tp->snd_cwnd_clamp)
+                tp->snd_cwnd++;
+            tp->snd_cwnd_cnt = 0;
+        } else {
+    //增加计数值
+            tp->snd_cwnd_cnt++;
+    }    
+   	#+END_SRC
+	#+html: </div>
+	
 	
 	
 * 第30章 TCP的输出
