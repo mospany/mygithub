@@ -1326,8 +1326,45 @@ out_err:
 	 	#+END_SRC
 
 *** 慢启动算法
-	
-	
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    void tcp_slow_start(struct tcp_sock *tp)
+    {
+        int cnt; /* increase in packets */
+     
+        /* RFC3465: ABC Slow start
+         * Increase only after a full MSS of bytes is acked
+         *
+         * TCP sender SHOULD increase cwnd by the number of
+         * previously unacknowledged bytes ACKed by each incoming
+         * acknowledgment, provided the increase is not more than L
+         */
+        if (sysctl_tcp_abc && tp->bytes_acked < tp->mss_cache)
+            return;
+    //限制slow start的cnt
+        if (sysctl_tcp_max_ssthresh > 0 && tp->snd_cwnd > sysctl_tcp_max_ssthresh)
+            cnt = sysctl_tcp_max_ssthresh >> 1;   /* limited slow start */
+        else
+            cnt = tp->snd_cwnd;          /* exponential increase */
+     
+        /* RFC3465: ABC
+         * We MAY increase by 2 if discovered delayed ack
+         */
+        if (sysctl_tcp_abc > 1 && tp->bytes_acked >= 2*tp->mss_cache)
+            cnt <<= 1;
+        tp->bytes_acked = 0;
+    //更新cnt，也就是当前拥塞窗口接受的段的个数.
+        tp->snd_cwnd_cnt += cnt;
+        while (tp->snd_cwnd_cnt >= tp->snd_cwnd) {
+    //这里snd_cwnd_cnt是snd_cwnd的几倍，拥塞窗口就增加几。
+            tp->snd_cwnd_cnt -= tp->snd_cwnd;
+    //如果拥塞窗口没有超过最大值，则加一
+            if (tp->snd_cwnd < tp->snd_cwnd_clamp)
+                tp->snd_cwnd++;
+        }
+    }
+   	#+END_SRC
+	#+html: </div>
 
 *** 备注
     这里着重解释一下，cwnd的指数增长是如何进行的，所有的文献中都会提到，cwnd在一个RTT内会翻倍，这里看到的源码似乎不是这样，而是接收一个ACK就加一。
