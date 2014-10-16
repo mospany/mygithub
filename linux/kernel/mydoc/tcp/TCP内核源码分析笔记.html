@@ -7,7 +7,7 @@
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="title" content="TCP内核源码分析笔记"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2014-10-15T09:53+0800"/>
+<meta name="generated" content="2014-10-15T11:03+0800"/>
 <meta name="author" content="mosp"/>
 <meta name="description" content=""/>
 <meta name="keywords" content="linux, kernel, tcp, 读书笔记， 网络管理"/>
@@ -177,6 +177,7 @@ for the JavaScript code in this tag.
 <li><a href="#sec-7">7 第29章 拥塞控制</a>
 <ul>
 <li><a href="#sec-7-1">7.1 拥塞状态</a></li>
+<li><a href="#sec-7-2">7.2 cwnd初始值</a></li>
 </ul>
 </li>
 <li><a href="#sec-8">8 第30章 TCP的输出</a>
@@ -1649,18 +1650,10 @@ for the JavaScript code in this tag.
 <li>由tcp_v4_do_rcv()-&gt;tcp_rcv_established().当前服务端处于TCP_ESTABLISHED状态。<br/>
 </li>
 <li>代码关键路径:<br/>
-    <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
-	#+BEGIN_SRC c -n<br/>
-
-<p><br/>
-	#+END_SRC<br/>
-    </div>
-</p></li>
+</li>
 </ul>
 
 
-<p>     <br/>
-</p>
 <p>     <br/>
 </p></div>
 </div>
@@ -1740,8 +1733,75 @@ for the JavaScript code in this tag.
 </li>
 </ol>
 
+</div>
+
+</div>
+
+<div id="outline-container-7-2" class="outline-3">
+<h3 id="sec-7-2"><span class="section-number-3">7.2</span> cwnd初始值</h3>
+<div class="outline-text-3" id="text-7-2">
+
+<ul>
+<li>客户端初始化是在发送syn包后接收到syn/ack包时处于SYN_SENT状态下进行初始化的。<br/>
+     tcp_rcv_synsent_state_process<sup><a class="footref" name="fnr-.1" href="#fn-.1">1</a></sup> tcp_init_metrics(sk);<br/>
+</li>
+<li>服务端初始化是在接收到syn包处于SYN_RECV状态下初始化的。<br/>
+</li>
+</ul>
+
+<p>　　　tcp_rcv_state_process<sup><a class="footref" name="fnr-.2" href="#fn-.2">2</a></sup>    tcp_init_metrics(sk);　　<br/>
+</p><ul>
+<li>tcp_init_metrics()调用tcp_init_cwnd().<br/>
+     tp-&gt;snd_cwnd = tcp_init_cwnd(tp, dst);<br/>
+</li>
+<li>tcp_init_cwnd()里实现取路由里设置的cwnd，TCP_INIT_CWND与tp-&gt;snd_cwnd_clamp取最小值。<br/>
 
 <p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #228b22;">__u32</span> <span style="color: #0000ff; font-size: 120%;">tcp_init_cwnd</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">dst_entry</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">dst</span><span style="color: #cd2626;">)</span>
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">3:  </span>     <span style="color: #228b22;">__u32</span> <span style="color: #a0522d;">cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #cd2626;">(</span>dst ? <span style="color: #008000; font-weight: bold;">dst_metric</span><span style="color: #cd2626;">(</span>dst<span style="color: #8b6508;">,</span> RTAX_INITCWND<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">:</span> <span style="color: #ff0000;">0</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">4:  </span>
+<span class="linenr">5:  </span>     <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!cwnd<span style="color: #cd2626;">)</span>
+<span class="linenr">6:  </span>         cwnd <span style="color: #8b6508;">=</span> TCP_INIT_CWND<span style="color: #8b6508;">;</span>
+<span class="linenr">7:  </span>     <span style="color: #a020f0;">return</span> <span style="color: #228b22;">min_t</span><span style="color: #cd2626;">(</span>__u32<span style="color: #8b6508;">,</span> cwnd<span style="color: #8b6508;">,</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_clamp</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">8:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+     [注]: 目前centos 6.2里kernel-2.6.32的TCP_INIT_CWND值为10.<br/>
+
+</p>
+<hr/>
+<p>
+     *** include/net/tcp.h:<br/>
+     TCP_INIT_CWND<sup><a class="footref" name="fnr-.3" href="#fn-.3">3</a></sup>             #define TCP_INIT_CWND 10<br/>
+
+</p>
+<hr/>
+<ul>
+<li>tp-&gt;snd_cwnd_clamp为允许的最大拥塞窗口值，初始值为65535。<br/>
+       它通过tcp_v4_init_sock()里调用:<br/>
+        tp-&gt;snd_cwnd_clamp = ~0;<br/>
+       实现，其类型为u16.<br/>
+</li>
+</ul>
+
+</li>
+</ul>
+
+
+<p><br/>
+
+</p>
+<hr/>
+<p>
+   *** net/ipv4/tcp_input.c:<br/>
+   tcp_rcv_synsent_state_process<sup><a class="footref" name="fnr-.1.2" href="#fn-.1">1</a></sup> tcp_init_metrics(sk);<br/>
+   tcp_rcv_state_process<sup><a class="footref" name="fnr-.2.2" href="#fn-.2">2</a></sup>    tcp_init_metrics(sk);<br/>
+
+</p>
+<hr/>
+
+<p>   <br/>
 </p>
 <p>    <br/>
 </p>
@@ -1793,16 +1853,35 @@ for the JavaScript code in this tag.
 
 
 <p><br/>
+</p><div id="footnotes">
+<h2 class="footnotes">Footnotes: </h2>
+<div id="text-footnotes">
+<p class="footnote"><sup><a class="footnum" name="fn-.1" href="#fnr-.1">1</a></sup> DEFINITION NOT FOUND: 5472<br/>
+</p>
+<p><br/>
+</p>
+<p class="footnote"><sup><a class="footnum" name="fn-.2" href="#fnr-.2">2</a></sup> DEFINITION NOT FOUND: 5713<br/>
+</p>
+<p><br/>
+</p>
+<p class="footnote"><sup><a class="footnum" name="fn-.3" href="#fnr-.3">3</a></sup> DEFINITION NOT FOUND: 203<br/>
+</p>
+<p><br/>
+</p>
+<p><br/>
 </p>
 <p>      <br/>
 </p></div>
 </div>
 </div>
 </div>
+
+</div>
+</div>
 </div>
 
 <div id="postamble">
-<p class="date">Date: 2014-10-15T09:53+0800</p>
+<p class="date">Date: 2014-10-15T11:03+0800</p>
 <p class="author">Author: mosp</p>
 <p class="creator"><a href="http://orgmode.org">Org</a> version 7.9.3f with <a href="http://www.gnu.org/software/emacs/">Emacs</a> version 24</p>
 <a href="http://validator.w3.org/check?uri=referer">Validate XHTML 1.0</a>

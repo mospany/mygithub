@@ -1165,12 +1165,6 @@ out_err:
 ** 服务端响应请求
    - 由tcp_v4_do_rcv()->tcp_rcv_established().当前服务端处于TCP_ESTABLISHED状态。
    - 代码关键路径:
-	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
-	#+BEGIN_SRC c -n
-    
-	#+END_SRC
-	#+html: </div>
-	 
 	 
 * 第25章 传输控制块
 ** 25.4 传输控制块的内存管理
@@ -1235,6 +1229,110 @@ out_err:
    tcp_rcv_synsent_state_process[5472] tcp_init_metrics(sk);
    tcp_rcv_state_process[5713]    tcp_init_metrics(sk);
    -------------------------------------------------------------------------------
+
+** 慢启动
+*** tcp_ack()
+	这个函数主要功能是： 
+	1 update重传队列，并基于sack来设置skb的相关buf。 
+	2 update发送窗口。 
+	3 基于sack的信息或者重复ack来决定是否进入拥塞模式。
+*** 拥塞控制入口
+    每接收到一个传输数据包的响应ack包进入tcp_cong_avoid()中判读该进行慢启动还是拥塞避免处理流程。
+	 	#+BEGIN_SRC c -n
+       static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
+       {
+        	if (tcp_ack_is_dubious(sk, flag)) {
+        		/* Advance CWND, if state allows this. */
+        		if ((flag & FLAG_DATA_ACKED) && !frto_cwnd &&
+        		    tcp_may_raise_cwnd(sk, flag))
+        			tcp_cong_avoid(sk, ack, prior_in_flight);
+        		tcp_fastretrans_alert(sk, prior_packets - tp->packets_out,
+        				      flag);
+        	} else {
+        		if ((flag & FLAG_DATA_ACKED) && !frto_cwnd)
+        			tcp_cong_avoid(sk, ack, prior_in_flight);
+        	}
+       }
+	 	#+END_SRC
+
+*** snd_ssthresh设置
+    这个值在加载cubic模块的时候可以传递一个我们制定的值给它，不过，默认是很大的值，我这里是2147483647,然后在接收ack期间(slow start)期间会调整这个值，
+	在cubic中，默认是16（一般来说说当拥塞窗口到达16的时候，snd_ssthresh会被设置为16).
+    在cubic中有两个可以设置snd_ssthresh的地方一个是hystart_update，一个是bictcp_recalc_ssthresh，后一个我这里就不介绍了，以后介绍拥塞状态机的时候
+	会详细介绍，现在只需要知道，只有遇到拥塞的时候，需要调整snd_ssthres的时候，我们才需要调用bictcp_recalc_ssthresh。
+    而hystart_update是在bictcp_acked中被调用，而bictcp_acked则是基本每次收到ack都会调用这个函数，我们来看在bictcp_acked中什么情况就会调用
+	hystart_update：
+	调用关系: tcp_ack() --> tcp_clean_rtx_queue() --> ca_ops->pkts_acked() --> bictcp_acked().
+ 	#+BEGIN_SRC c -n	
+    /* hystart triggers when cwnd is larger than some threshold */
+    if (hystart && tp->snd_cwnd <= tp->snd_ssthresh &&
+        tp->snd_cwnd >= hystart_low_window)
+        hystart_update(sk, delay);
+ 	#+END_SRC	
+    其中hystart是hybrid slow start打开的标志，默认是开启，hystart_low_window是设置snd_ssthresh的最小拥塞窗口值，默认是16。而tp->snd_ssthresh默认
+	是一个很大的值，因此这里就知道了，当拥塞窗口增大到16的时候我们就会进去hystart_update来更新snd_ssthresh.因此hystart_updat换句话来说也就是主要用于
+	是否退出slow start。
+ 	#+BEGIN_SRC c -n
+    static int hystart_low_window __read_mostly = 16;
+    module_param(hystart_low_window, int, 0644);
+    MODULE_PARM_DESC(hystart_low_window, "lower bound cwnd for hybrid slow start");
+
+    static void hystart_update(struct sock *sk, u32 delay)
+    {
+        struct tcp_sock *tp = tcp_sk(sk);
+        struct bictcp *ca = inet_csk_ca(sk);
+     
+        if (!(ca->found & hystart_detect)) {
+    .................................................................
+            /*
+             * Either one of two conditions are met,
+             * we exit from slow start immediately.
+             */
+    //found是一个是否退出slow start的标记
+            if (ca->found & hystart_detect)
+    //设置snd_ssthresh
+                tp->snd_ssthresh = tp->snd_cwnd;
+        }
+    }
+ 	#+END_SRC	
+	
+    然后是slow start的处理,这里有关abc的处理，注释都很详细了，这里就不解释了，我们主要看abc关闭的部分。这里使用cnt，也是主要为了打开abc之后的slow start。
+    这是abc（Appropriate Byte Counting）相关的rfc：
+	
+	
+*** 拥塞控制实现
+	 	#+BEGIN_SRC c -n
+        static void bictcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
+        {
+            struct tcp_sock *tp = tcp_sk(sk);
+            struct bictcp *ca = inet_csk_ca(sk);
+            //判断发送拥塞窗口是否到达限制，如果到达限制则直接返回。
+            if (!tcp_is_cwnd_limited(sk, in_flight))
+                return;
+            //开始决定进入slow start还是拥塞控制状态
+            if (tp->snd_cwnd <= tp->snd_ssthresh) {
+                //是否需要reset对应的bictcp的值
+                if (hystart && after(ack, ca->end_seq))
+                    bictcp_hystart_reset(sk);
+                //进入slow start状态
+                tcp_slow_start(tp);
+            } else {
+                //进入拥塞避免状态，首先会更新ca->cnt.
+                bictcp_update(ca, tp->snd_cwnd);
+                //然后进入拥塞避免
+                tcp_cong_avoid_ai(tp, ca->cnt);
+            }
+        }
+	 	#+END_SRC
+
+*** 慢启动算法
+	
+	
+
+*** 备注
+    这里着重解释一下，cwnd的指数增长是如何进行的，所有的文献中都会提到，cwnd在一个RTT内会翻倍，这里看到的源码似乎不是这样，而是接收一个ACK就加一。
+	这里疑惑了一下，接收一个ACK的时间不就是RTT吗？其实不是的，一个cwnd内的包是一起发送的，之间相关的时间很短，只和带宽有关，ACK也是连续返回的，
+	一个cwnd内的所有ACK都返回了才算是一个RTT。每返回一个ACK，cwnd就加一，那等所有ACK都返回了，cwnd也就翻倍了。
    
 	
 	
