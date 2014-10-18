@@ -1649,8 +1649,141 @@ out_err:
     <14>的tcp_time_to_recover（）是个极为重要的函数，对第一个重复的ACK而言，返回的是0。 
     在<15>处的tcp_try_to_open会将icsk->icsk_ca_state的状态由原来的TCP_CA_Open设为 
     TCP_CA_Disorder。 
-    <16>处返回整个函数。这2个函数后面会介绍，现在只是提其功能。 
+    <16>处返回整个函数。这2个函数后面会介绍，现在只是提其功能。
 
+** 第2个重复的ACK
+   在不增加窗口大小的情况下，本ACK包还是会通过FASTPATH进入tcp_ack()函数。在增加了sacked_out后与第一个重复的ACK一样就返回了。 
+
+** 第3个重复的ACK
+   该ACK包与前2个包不同之处是：这个包要更新拥塞控制的状态了，这个就是经典的RENO：3个重复ACK引发重传。
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+   static int tcp_time_to_recover(struct sock *sk, struct tcp_sock *tp)
+   {
+    	__u32 packets_out;
+    
+    	/* Trick#1: The loss is proven. */
+    	if (tp->lost_out)
+    		return 1;
+    
+    	/* Not-A-Trick#2 : Classic rule... */
+     	// if (tcp_dupack_heuristics(tp) > tp->reordering) // 在linux kernel-2.6.32已经改成行了，
+        // static inline int tcp_dupack_heuristics(struct tcp_sock *tp)
+        // {
+        //  	return tcp_is_fack(tp) ? tp->fackets_out : tp->sacked_out + 1;
+        // }
+    	if (tcp_fackets_out(tp) > tp->reordering)   //<17> 
+    		return 1;
+    
+    	/* Trick#3 : when we use RFC2988 timer restart, fast
+    	 * retransmit can be triggered by timeout of queue head.
+    	 */
+    	if (tcp_head_timedout(sk, tp))
+    		return 1;
+    
+    	/* Trick#4: It is still not OK... But will it be useful to delay
+    	 * recovery more?
+    	 */
+    	packets_out = tp->packets_out;
+    	if (packets_out <= tp->reordering &&
+    	    tp->sacked_out >= max_t(__u32, packets_out/2, sysctl_tcp_reordering)
+   && !tcp_may_send_now(sk, tp)) {
+    		/* We have nothing to send. This connection is limited
+    		 * either by receiver window or by application.
+    		 */
+    		return 1;
+    	}
+    
+    	return 0;
+   }
+	#+END_SRC
+	#+html: </div>
+    
+   <17>处的tp->reordering初始化的值是3，这个就是个乱序包的阈值。因为没有SACK，FA 
+   CK，所以tcp_fackets_out(tp)其实就是返回 sacked_out+1，也就是4，呵呵，终于可以返回1了。 
+   ------------------------------------------------------------------------------
+   ** include/net/tcp.h:
+   CP_FASTRETRANS_THRESH[75]     #define TCP_FASTRETRANS_THRESH 3
+   ------------------------------------------------------------------------------
+   ./tcp_input.c:79:int sysctl_tcp_reordering __read_mostly = TCP_FASTRETRANS_THRESH;
+   ./tcp_ipv4.c:1824:	tp->reordering = sysctl_tcp_reordering;
+
+   第3个重复的ACK在tcp_time_to_recover（）返回1后，会在
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+   tcp_fastretrans_alert()
+   {
+    	switch (icsk->icsk_ca_state) {
+   ..............................
+    		tp->high_seq = tp->snd_nxt;    //<18>
+    		tp->prior_ssthresh = 0;
+    		tp->undo_marker = tp->snd_una;
+    		tp->undo_retrans = tp->retrans_out;
+    
+    	 	if (icsk->icsk_ca_state < TCP_CA_CWR) {
+    			if (!(flag&FLAG_ECE))
+    				tp->prior_ssthresh = tcp_current_ssthresh(sk);
+    			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);  // <19>
+    			TCP_ECN_queue_cwr(tp);
+    		}
+    		tp->bytes_acked = 0;
+    		tp->snd_cwnd_cnt = 0;
+    		tcp_set_ca_state(sk, TCP_CA_Recovery); // <20> 
+    	}
+    
+    	if (is_dupack || tcp_head_timedout(sk, tp))
+    		tcp_update_scoreboard(sk, tp);   //<21>
+    	tcp_cwnd_down(sk);             //<22>
+    	tcp_xmit_retransmit_queue(sk);  //<23>
+   }
+	#+END_SRC
+	#+html: </div>
+    
+   <18> : 此处设置发生状态转化时的最高发送序号 tp->snd_nxt，以后会用到它。 
+   <19> : 最终调用RENO的tcp_reno_ssthresh（）进行经典运算，将snd_ssthresh设为tp->snd_cwnd的一半。
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+    /* Slow start threshold is half the congestion window (min 2) */
+    u32 tcp_reno_ssthresh(struct sock *sk)
+    {
+     	const struct tcp_sock *tp = tcp_sk(sk);
+     	return max(tp->snd_cwnd >> 1U, 2U);
+    }
+    EXPORT_SYMBOL_GPL(tcp_reno_ssthresh);
+	#+END_SRC
+	#+html: </div>
+   <20> : 将本连接从TCP_CA_Disorder变为TCP_CA_Recovery。 
+   <21> : 主要是把 要重发的那个包的进行：TCP_SKB_CB(skb)->sacked |= TCPCB_LOST。增加tp->lost_out的值， 
+   还有一些帮助用的hint变量。 
+   <22> : tcp_cwnd_down()每收到2个ACK，就把发送控制窗口tp->snd_cwnd缩小。
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+        /* Decrease cwnd each second ack. */
+        static void tcp_cwnd_down(struct sock *sk, int flag)
+        {
+         	struct tcp_sock *tp = tcp_sk(sk);
+         	int decr = tp->snd_cwnd_cnt + 1;
+         
+         	if ((flag & (FLAG_ANY_PROGRESS | FLAG_DSACKING_ACK)) ||
+         	    (tcp_is_reno(tp) && !(flag & FLAG_NOT_DUP))) {
+         		tp->snd_cwnd_cnt = decr & 1;
+         		decr >>= 1;
+         
+         		if (decr && tp->snd_cwnd > tcp_cwnd_min(sk))
+         			tp->snd_cwnd -= decr;
+         
+         		tp->snd_cwnd = min(tp->snd_cwnd, tcp_packets_in_flight(tp) + 1);
+         		tp->snd_cwnd_stamp = tcp_time_stamp;
+         	}
+        }
+	#+END_SRC
+	#+html: </div>
+   <23> : 因为<20>已经把要重发的包标为TCPCB_LOST，在这里会引起重发这个包，同时重置RTO时钟 
+   （此场景中的3个重复的ACK是不会是RTO超时的，一般的RTO大约几秒，而这3个ACK才1秒多,我也确 
+   实没有找到重置RTO的地方）
+
+   
+   
 ** 快速恢复
    后来的“快速恢复”算法是在上述的“快速重传”算法后添加的，当收到3个重复ACK时，TCP最后进入的不是拥塞避免阶段，而是快速恢复阶段。
    快速重传和快速恢复算法一般同时使用。快速恢复的思想是“数据包守恒”原则，即同一个时刻在网络中的数据包数量是恒定的，只有当“老”数
