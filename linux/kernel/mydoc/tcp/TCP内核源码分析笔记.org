@@ -1647,10 +1647,10 @@ out_err:
     TCP_CA_Disorder。 
     <16>处返回整个函数。这2个函数后面会介绍，现在只是提其功能。
 
-** 第2个重复的ACK
+*** 第2个重复的ACK
    在不增加窗口大小的情况下，本ACK包还是会通过FASTPATH进入tcp_ack()函数。在增加了sacked_out后与第一个重复的ACK一样就返回了。 
 
-** 第3个重复的ACK
+*** 第3个重复的ACK
    该ACK包与前2个包不同之处是：这个包要更新拥塞控制的状态了，这个就是经典的RENO：3个重复ACK引发重传。
 	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
 	#+BEGIN_SRC c -n
@@ -1791,8 +1791,8 @@ out_err:
 	  从而更一步提高吞吐量。
    快速恢复：bictcp_undo_cwnd，直接把snd_cwnd更新为max(snd_cwnd，last_max_cwnd)，和掉包前相差不大。
 
-* 拥塞处理
-　拥塞处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:
+** 拥塞状态机
+　拥塞状态机处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:
 　- each incoming ACK, if state is not “Open”(每个处于非OPEN状态的ack包)
   - when arrived ACK is unusual, namely: (异常的ack包类型如下)
     + SACK
@@ -1803,6 +1803,13 @@ out_err:
   2 从不同的拥塞状态恢复。 
   3 检测到一个失败的拥塞状态从而使数据包的传输的延迟。 
   4 从所有的拥塞状态恢复到Open状态。
+　此函数分成几个阶段：
+　A. FLAG_ECE，收到包含ECE标志的ACK。
+　B. reneging SACKs，ACK指向已经被SACK的数据段。如果是此原因，进入超时处理，然后返回。
+　C. state is not Open，发现丢包，需要标志出丢失的包，这样就知道该重传哪些包了。
+　D. 检查是否有错误( left_out > packets_out)。
+　E. 各个状态是怎样退出的，当snd_una >= high_seq时候。
+　F. 各个状态的处理和进入。  
  	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
 	#+BEGIN_SRC c -n
     struct inet_connection_sock *icsk = inet_csk(sk);  
@@ -2275,8 +2282,284 @@ out_err:
     }      
 	#+END_SRC
 	#+html: </div>
-	
-	
+
+** 拥塞事件	  
+　　　TCP定义了几个拥塞事件，当这些事件发生时，我们可以通过TCP的拥塞控制算法，调用自定义的处理函数，
+　　　来做一些额外的事情的。也就是说，我们可以很简便的参与到TCP对拥塞事件的处理过程中。
+　　　 
+*** TCP的拥塞事件集
+	#+BEGIN_SRC c -n 	
+　　　 	/* Events passed to congestion control interface */  
+　　　 	  
+　　　 	enum tcp_ca_event {  
+　　　 	    CA_EVENT_TX_START, /* first transmit when no packets in flight */  
+　　　 	    CA_EVENT_CWND_RESTART, /* congestion window restart */  
+　　　 	    CA_EVENT_COMPLETE_CWR, /* end of congestion recovery */  
+　　　 	    CA_EVENT_FRTO, /* fast recovery timeout */  
+　　　 	    CA_EVENT_LOSS, /* loss timeout */  
+　　　 	    CA_EVENT_FAST_ACK, /* in sequence ack */  
+　　　 	    CA_EVENT_SLOW_ACK, /* other ack */  
+　　　 	 };  
+	#+END_SRC
+	　　　 
+*** 钩子函数定义
+	#+BEGIN_SRC c -n 
+　　　 	 struct tcp_congestion_ops {  
+　　　 	     ...  
+　　　 	   
+　　　 	     /* call when cwnd event occurs (optional) */  
+　　　 	     void (*cwnd_event) (struct sock *sk, enum tcp_ca_event ev);  
+　　　 	   
+　　　 	     ...  
+　　　 	 };  
+	#+END_SRC　　　 
+*** 封装调用
+	#+BEGIN_SRC c -n 	
+　　　 	static inline void tcp_ca_event (struct sock *sk, const enum tcp_ca_event event)  
+　　　 	{  
+　　　 	    const struct inet_connection_sock *icsk = inet_csk(sk);  
+　　　 	  
+　　　 	    if (icsk->icsk_ca_ops->cwnd_event)  
+　　　 	        icsk->icsk_ca_ops->cwnd_event(sk, event);  
+　　　 	}  
+	#+END_SRC　　　 
+　　　 
+*** CA_EVENT_TX_START 
+　　　当发送一个数据包时，如果网络中无发送且未确认的数据包，则触发此事件。
+	#+BEGIN_SRC c -n 	
+　　　 	static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it, gfp_t gfp_mask)  
+　　　 	{  
+　　　 	    ...  
+　　　 	  
+　　　 	    if (tcp_packets_in_flight(tp) == 0) {  
+　　　 	        tcp_ca_event(sk, CA_EVENT_TX_START);  
+　　　 	        skb->ooo_okay = 1; /*此时发送队列可以改变，因为上面没有数据包 */  
+　　　 	  
+　　　 	    } else  
+　　　 	         skb->ooo_okay = 0;   
+　　　 	     ...  
+　　　 	 }  
+	#+END_SRC　　　 
+　　　 
+*** CA_EVENT_CWND_RESTART 
+　　　发送方在发送数据包时，如果发送的数据包有负载，则会检测拥塞窗口是否超时。
+　　　如果超时，则会使拥塞窗口失效并重新计算拥塞窗口，同时触发CA_EVENT_CWND_RESTART事件。
+	#+BEGIN_SRC c -n 	
+　　　 	/* Congestion state accounting after a packet has been sent. */  　　　 	  
+　　　 	static void tcp_event_data_sent(struct tcp_sock *tp, struct sock *sk)  
+　　　 	{  
+　　　 	    struct inet_connection_sock *icsk = inet_csk(sk);  
+　　　 	    const u32 now = tcp_time_stamp;  
+　　　 	      
+　　　 	    if (sysctl_tcp_slow_start_after_idle &&  
+　　　 	        (! tp->packets_out && (s32) (now - tp->lsndtime) > icsk->icsk_rto))  
+　　　 	         tcp_cwnd_restart(sk, __sk_dst_get(sk)); /* 重置cwnd */  
+　　　 	    
+　　　 	     tp->lsndtime = now; /* 更新最近发包的时间*/  
+　　　 	   
+　　　 	     /* If it is a reply for ato after last received packet, enter pingpong mode. */  
+　　　 	     if ((u32) (now - icsk->icsk_ack.lrcvtime) < icsk->icsk_ack.ato)  
+　　　 	         icsk->icsk_ack.pingpong = 1;  
+　　　 	 }  
+	#+END_SRC　　　 
+　　　 
+　　　tcp_event_data_sent()中，符合三个条件才重置cwnd：
+　　　（1）tcp_slow_start_after_idle选项设置，这个内核默认置为1
+　　　（2）tp->packets_out == 0，表示网络中没有未确认数据包
+　　　（3）now - tp->lsndtime > icsk->icsk_rto，距离上次发送数据包的时间超过了RTO
+	#+BEGIN_SRC c -n 	　　　 
+　　　 	/* RFC2861. Reset CWND after idle period longer than RTO to "restart window". 
+　　　 	 * This is the first part of cwnd validation mechanism. 
+　　　 	 */  
+　　　 	static void tcp_cwnd_restart(struct sock *sk, const struct dst_entry *dst)  
+　　　 	{  
+　　　 	    struct tcp_sock *tp = tcp_sk(sk);  
+　　　 	    s32 delta = tcp_time_stamp - tp->lsndtime; /* 距离上次发包的时间*/  
+　　　 	    u32 restart_cwnd = tcp_init_cwnd(tp, dst);  
+　　　 	     u32 cwnd = tp->snd_cwnd;  
+　　　 	   
+　　　 	     tcp_ca_event(sk, CA_EVENT_CWND_RESTART); /* 在这里！触发拥塞窗口重置事件*/  
+　　　 	     tp->snd_ssthresh = tcp_current_ssthresh(sk); /* 保存阈值，并没有重置*/  
+　　　 	     restart_cwnd = min(restart_cwnd, cwnd);  
+　　　 	   
+　　　 	     /* 闲置时间每超过一个RTO且cwnd比重置后的大时，cwnd减半。*/  
+　　　 	     while((delta -= inet_csk(sk)->icsk_rto) > 0 && cwnd > restart_cwnd)  
+　　　 	         cwnd >>= 1;  
+　　　 	   
+　　　 	     tp->snd_cwnd = max(cwnd, restart_cwnd);  
+　　　 	     tp->snd_cwnd_stamp = tcp_time_stamp;  
+　　　 	     tp->snd_cwnd_used = 0;  
+　　　 	 }  
+	#+END_SRC　　　 　　　 
+*** CA_EVENT_COMPLETE_CWR 
+　　　当退出CWR状态，或者退出Recovery状态时，会调用tcp_complete_cwr()来设置拥塞窗口，这个时候
+　　　会触发CA_EVENT_COMPLETE_CWR来通知拥塞控制模块：“我已经停止减小拥塞窗口了！如果你想
+　　　再做点什么补充，就是现在！”
+	#+BEGIN_SRC c -n 	　　　 
+　　　	static inline void tcp_complete_cwr(struct sock *sk)  
+　　　	{
+　　　	   struct tcp_sock *tp = tcp_sk(sk);  
+　　　	 
+　　　	   /* Do not moderate cwnd if it's already undone in cwr or recovery. */  
+　　　	   if (tp->undo_marker) {  
+　　　	       if (inet_csk(sk)->icsk_ca_state == TCP_CA_CWR)  
+　　　	           tp->snd_cwnd = min(tp->snd_cwnd, tp->snd_ssthresh);  
+　　　	       else /* PRR */  
+　　　	            tp->snd_cwnd = tp->snd_ssthresh;  
+　　　	  
+　　　	        tp->snd_cwnd_stamp = tcp_time_stamp;  
+　　　	    }  
+　　　	   
+　　　	    /* 在这里设置拥塞窗口和慢启动阈值会覆盖掉ssthresh()的设置*/  
+　　　	    tcp_ca_event(sk, CA_EVENT_COMPLETE_CWR);  
+　　　	}  
+	#+END_SRC　　　 
+*** CA_EVENT_FRTO 
+　　　启用F-RTO时，发生超时后，首先会进行F-RTO处理，看看这个超时是不是虚假的，如果不是的话
+　　　再进行传统的超时重传。这时候会减小慢启动阈值，而拥塞窗口暂时保持不变。
+	#+BEGIN_SRC c -n 	　　　 
+　　　/* RTO occurred, but do not yet enter Loss state. Instead, defer RTO recovery a bit and use 
+　　　 * heuristics in tcp_process_frto() to detect if the RTO was spurious. 
+　　　 */  
+　　　void tcp_enter_frto(struct sock *sk)  
+　　　{  
+　　　    const struct inet_connection_sock *icsk = inet_csk(sk);  
+　　　    struct tcp_sock *tp = tcp_sk(sk);  
+　　　    struct sk_buff *skb;  
+　　　    
+　　　     if ((! tp->frto_counter && icsk->icsk_ca_state <= TCP_CA_Disorder) ||  
+　　　         tp->snd_una == tp->high_seq ||  
+　　　         ((icsk->icsk_ca_state == TCP_CA_Loss || tp->frto_counter) &&  
+　　　          ! icsk->icsk_retransmits)) {  
+　　　   
+　　　         tp->prior_ssthresh = tcp_current_ssthresh(sk); /* 保留旧阈值*/  
+　　　   
+　　　         if (tp->frto_counter) { /* 这种情况非常罕见*/  
+　　　             u32 stored_cwnd;  
+　　　             stored_cwnd = tp->snd_cwnd;  
+　　　             tp->snd_cwnd = 2;  
+　　　             tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);  
+　　　             tp->snd_cwnd = stored_cwnd;  
+　　　   
+　　　         } else {  
+　　　             tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk); /* 重新设置慢启动阈值*/  
+　　　         }  
+　　　   
+　　　         tcp_ca_event(sk, CA_EVENT_FRTO); /* 这里设置慢启动阈值会覆盖掉ssthresh()的设置*/  
+　　　     }  
+　　　     ...  
+　　　 }  
+	#+END_SRC　　　 
+*** CA_EVENT_LOSS 
+　　　上面我们说到，如果超时不是虚假的话，就会进入超时重传，也就是TCP_CA_Loss状态。
+	#+BEGIN_SRC c -n 	　　　 
+　　　/* Enter Loss state. If "how" is not zero, forget all SACK information and reset tags completely, 
+　　　 * otherwise preserve SACKs. If receiver dropped its ofo queue, we will know this due to 
+　　　 * reneging detection. 
+　　　 */  
+　　　void tcp_enter_loss(struct sock *sk, int how)  
+　　　{  
+　　　    const struct inet_connection_sock *icsk = inet_csk(sk);  
+　　　    struct tcp_sock *tp = tcp_sk(sk);  
+　　　     struct sk_buff *skb;  
+　　　    
+　　　     /* Reduce ssthresh if it has not yet been made inside this window. 
+　　　      * 要么是从Open或Disorder状态进入Loss状态，要么是在Loss状态又发生了超时：） 
+　　　      * 我们知道在CWR或Recovery状态中可以以进入Loss，但在那两个状态中阈值已经被重置过了。 
+　　　      */  
+　　　     if (icsk->icsk_ca_state <= TCP_CA_Disorder || tp->snd_una == tp->high_seq ||  
+　　　         (icsk->icsk_ca_state == TCP_CA_Loss && ! icsk->icsk_retransmits)) {  
+　　　   
+　　　         tp->prior_ssthresh = tcp_current_ssthresh(sk); /* 保存旧阈值*/  
+　　　         tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk); /* 重新设置慢启动阈值*/  
+　　　   
+　　　         tcp_ca_event(sk, CA_EVENT_LOSS); /* 这里设置慢启动阈值会覆盖掉ssthresh()的设置*/  
+　　　     }  
+　　　   
+　　　     tp->snd_cwnd = 1;  
+　　　     tp->snd_cwnd_cnt = 0;  
+　　　     tp->snd_cwnd_stamp = tcp_time_stamp;  
+　　　     ...  
+　　　 }   
+	#+END_SRC　　　 
+　　　 
+*** CA_EVENT_FAST_ACK 	
+　　　如果我们收到符合预期的ACK，那么就进入快速路径的处理流程，在tcp_ack()中进行负荷无关的处理，
+　　　同时触发CA_EVENT_FAST_ACK事件。
+	#+BEGIN_SRC c -n 	　　　 
+　　　static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)  
+　　　{  
+　　　    ...  
+　　　    /* 如果处于快速路径中*/  
+　　　    if (! (flag & FLAG_SLOWPATH) && after(ack, prior_snd_una)) {  
+　　　  
+　　　        /* Window is constant, pure forward advance. 
+　　　         * No more checks are required. 
+　　　         */  
+　　　         tcp_update_w1(tp, ack_seq); /*记录更新发送窗口的ACK段序号*/  
+　　　         tp->snd_una = ack; /* 更新发送窗口左端 */  
+　　　         flag |= FLAG_WIN_UPDATE; /* 设置发送窗口更新标志 */  
+　　　   
+　　　         tcp_ca_event(sk, CA_EVENT_FAST_ACK); /* 快速路径拥塞事件钩子*/  
+　　　   
+　　　         NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPHPACKS);  
+　　　     }  
+　　　    ...  
+　　　 }  
+	#+END_SRC　　　 
+　　　 
+*** CA_EVENT_SLOW_ACK	
+　　　如果我们收到不符合预期的ACK，那么就不能走快速路径，而必须经过全面的检查，即进入慢速路径的
+　　　处理流程。同样在tcp_ack()中进行负荷无关的处理，同时触发CA_EVENT_SLOW_ACK事件。
+	#+BEGIN_SRC c -n 	　　　 
+　　　static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)  
+　　　{  
+　　　    ...  
+　　　    /* 如果处于快速路径中*/  
+　　　    if (! (flag & FLAG_SLOWPATH) && after(ack, prior_snd_una)) {  
+　　　        ...  
+　　　  
+　　　    } else { /* 进入慢速路径 */  
+　　　        if (ack_seq != TCP_SKB_CB(skb)->end_seq)  
+　　　             flag |= FLAG_DATA; /* 此ACK携带负荷*/  
+　　　         else  
+　　　             NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPPUREACKS);  
+　　　   
+　　　         flag |= tcp_ack_update_window(sk, skb, ack, ack_seq); /* 更新发送窗口*/  
+　　　           
+　　　          /* 根据SACK选项标志重传队列中SKB的记分牌状态*/  
+　　　         if (TCP_SKB_CB(skb)->sacked)  
+　　　             flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una);  
+　　　    
+　　　         /* 查看ACK是否携带ECE标志 */  
+　　　         if (TCP_ECN_rcv_ecn_echo(tp, tcp_hdr(skb)))  
+　　　             flag |= FLAG_ECE;  
+　　　    
+　　　         tcp_ca_event(sk, CA_EVENT_SLOW_ACK); /* 慢速路径拥塞事件钩子*/  
+　　　     }  
+　　　     ...  
+　　　 }  
+	#+END_SRC　　　 
+　　　 
+*** 阈值的设置 
+　　　用拥塞算法的ssthresh()来设置慢启动阈值tp->snd_ssthresh。
+　　　（1）tcp_enter_cwr
+　　　    进入CWR状态时。
+　　　    Set slow start threshold and cwnd not falling to slow start.
+　　　（2）tcp_enter_frto
+　　　    进入FRTO处理时。
+　　　（3）tcp_enter_loss
+　　　     进入Loss状态时。
+　　　（4）tcp_fastretrans_alert
+　　　    进入Recovery状态时。
+　　　可见ssthresh()的调用时机是在进入CWR、FRTO、Loss、Recovery这几个异常状态时。
+　　　 
+　　　tp->snd_ssthresh的使用：
+　　　（1）在进入CWR、FRTO、Loss、Recovery时调用ssthresh()重新设置，在退出这些状态时，作为慢启动阈值。
+　　　（2）作为tcp_cwnd_min()的返回值，在tcp_cwnd_down()中被调用，而tcp_cwnd_down()在CWR和Recovery
+　　　    状态中被调用。
+　　　（3）退出CWR、Recovery状态时，赋值给tp->snd_cwnd，避免进入慢启动。
+	  	
 * 第30章 TCP的输出
 ** tcp_sendmsg()
    1. 先计算应该copy的序号与位置，设置skb->end_seq.
