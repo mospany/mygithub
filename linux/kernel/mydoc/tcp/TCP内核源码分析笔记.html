@@ -7,7 +7,7 @@
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="title" content="TCP内核源码分析笔记"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2014-10-20T16:32+0800"/>
+<meta name="generated" content="2014-10-20T17:52+0800"/>
 <meta name="author" content="mosp"/>
 <meta name="description" content=""/>
 <meta name="keywords" content="linux, kernel, tcp, 读书笔记， 网络管理"/>
@@ -178,55 +178,56 @@ for the JavaScript code in this tag.
 <ul>
 <li><a href="#sec-7-1">7.1 拥塞状态</a></li>
 <li><a href="#sec-7-2">7.2 cwnd初始值</a></li>
-<li><a href="#sec-7-3">7.3 慢启动</a>
+<li><a href="#sec-7-3">7.3 SACK/RENO/FACK是否启用</a></li>
+<li><a href="#sec-7-4">7.4 慢启动</a>
 <ul>
-<li><a href="#sec-7-3-1">7.3.1 连接建立时</a></li>
-<li><a href="#sec-7-3-2">7.3.2 tcp_ack()</a></li>
-<li><a href="#sec-7-3-3">7.3.3 拥塞控制入口</a></li>
-<li><a href="#sec-7-3-4">7.3.4 snd_ssthresh设置</a></li>
-<li><a href="#sec-7-3-5">7.3.5 snd_cwnd_clamp设置</a>
+<li><a href="#sec-7-4-1">7.4.1 连接建立时</a></li>
+<li><a href="#sec-7-4-2">7.4.2 tcp_ack()</a></li>
+<li><a href="#sec-7-4-3">7.4.3 拥塞控制入口</a></li>
+<li><a href="#sec-7-4-4">7.4.4 snd_ssthresh设置</a></li>
+<li><a href="#sec-7-4-5">7.4.5 snd_cwnd_clamp设置</a>
 <ul>
-<li><a href="#sec-7-3-5-1">7.3.5.1 初始值后第一次修改</a></li>
-<li><a href="#sec-7-3-5-2">7.3.5.2 连接复位前更新</a></li>
+<li><a href="#sec-7-4-5-1">7.4.5.1 初始值后第一次修改</a></li>
+<li><a href="#sec-7-4-5-2">7.4.5.2 连接复位前更新</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-3-6">7.3.6 拥塞控制实现</a></li>
-<li><a href="#sec-7-3-7">7.3.7 慢启动算法</a></li>
-<li><a href="#sec-7-3-8">7.3.8 备注</a></li>
+<li><a href="#sec-7-4-6">7.4.6 拥塞控制实现</a></li>
+<li><a href="#sec-7-4-7">7.4.7 慢启动算法</a></li>
+<li><a href="#sec-7-4-8">7.4.8 备注</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-4">7.4 拥塞避免</a>
+<li><a href="#sec-7-5">7.5 拥塞避免</a>
 <ul>
-<li><a href="#sec-7-4-1">7.4.1 拥塞避免算法</a></li>
+<li><a href="#sec-7-5-1">7.5.1 拥塞避免算法</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-5">7.5 快速重传</a>
+<li><a href="#sec-7-6">7.6 快速重传</a>
 <ul>
-<li><a href="#sec-7-5-1">7.5.1 快速重传做的事情有：</a></li>
-<li><a href="#sec-7-5-2">7.5.2 第一个重复的ACK</a></li>
-<li><a href="#sec-7-5-3">7.5.3 第2个重复的ACK</a></li>
-<li><a href="#sec-7-5-4">7.5.4 第3个重复的ACK</a></li>
+<li><a href="#sec-7-6-1">7.6.1 快速重传做的事情有：</a></li>
+<li><a href="#sec-7-6-2">7.6.2 第一个重复的ACK</a></li>
+<li><a href="#sec-7-6-3">7.6.3 第2个重复的ACK</a></li>
+<li><a href="#sec-7-6-4">7.6.4 第3个重复的ACK</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-6">7.6 快速恢复</a>
+<li><a href="#sec-7-7">7.7 快速恢复</a>
 <ul>
-<li><a href="#sec-7-6-1">7.6.1 具体来说快速恢复的主要步骤是：</a></li>
+<li><a href="#sec-7-7-1">7.7.1 具体来说快速恢复的主要步骤是：</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-7">7.7 拥塞状态机</a></li>
-<li><a href="#sec-7-8">7.8 拥塞事件</a>
+<li><a href="#sec-7-8">7.8 拥塞状态机</a></li>
+<li><a href="#sec-7-9">7.9 拥塞事件</a>
 <ul>
-<li><a href="#sec-7-8-1">7.8.1 TCP的拥塞事件集</a></li>
-<li><a href="#sec-7-8-2">7.8.2 钩子函数定义</a></li>
-<li><a href="#sec-7-8-3">7.8.3 封装调用</a></li>
-<li><a href="#sec-7-8-4">7.8.4 CA_EVENT_TX_START</a></li>
-<li><a href="#sec-7-8-5">7.8.5 CA_EVENT_CWND_RESTART</a></li>
-<li><a href="#sec-7-8-6">7.8.6 CA_EVENT_COMPLETE_CWR</a></li>
-<li><a href="#sec-7-8-7">7.8.7 CA_EVENT_FRTO</a></li>
-<li><a href="#sec-7-8-8">7.8.8 CA_EVENT_LOSS</a></li>
-<li><a href="#sec-7-8-9">7.8.9 CA_EVENT_FAST_ACK</a></li>
-<li><a href="#sec-7-8-10">7.8.10 CA_EVENT_SLOW_ACK</a></li>
-<li><a href="#sec-7-8-11">7.8.11 阈值的设置</a></li>
+<li><a href="#sec-7-9-1">7.9.1 TCP的拥塞事件集</a></li>
+<li><a href="#sec-7-9-2">7.9.2 钩子函数定义</a></li>
+<li><a href="#sec-7-9-3">7.9.3 封装调用</a></li>
+<li><a href="#sec-7-9-4">7.9.4 CA_EVENT_TX_START</a></li>
+<li><a href="#sec-7-9-5">7.9.5 CA_EVENT_CWND_RESTART</a></li>
+<li><a href="#sec-7-9-6">7.9.6 CA_EVENT_COMPLETE_CWR</a></li>
+<li><a href="#sec-7-9-7">7.9.7 CA_EVENT_FRTO</a></li>
+<li><a href="#sec-7-9-8">7.9.8 CA_EVENT_LOSS</a></li>
+<li><a href="#sec-7-9-9">7.9.9 CA_EVENT_FAST_ACK</a></li>
+<li><a href="#sec-7-9-10">7.9.10 CA_EVENT_SLOW_ACK</a></li>
+<li><a href="#sec-7-9-11">7.9.11 阈值的设置</a></li>
 </ul></li>
 </ul>
 </li>
@@ -1851,21 +1852,130 @@ for the JavaScript code in this tag.
 </p>
 <hr/>
 
-<p><br/>
+<p>   <br/>
 </p></div>
 
 </div>
 
 <div id="outline-container-7-3" class="outline-3">
-<h3 id="sec-7-3"><span class="section-number-3">7.3</span> 慢启动</h3>
+<h3 id="sec-7-3"><span class="section-number-3">7.3</span> SACK/RENO/FACK是否启用</h3>
 <div class="outline-text-3" id="text-7-3">
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">These function determine how the currrent flow behaves in respect of SACK </span>
+<span class="linenr"> 2:  </span><span style="color: #b22222;"> * handling. SACK is negotiated with the peer, and therefore it can very between </span>
+<span class="linenr"> 3:  </span><span style="color: #b22222;"> * different flows. </span>
+<span class="linenr"> 4:  </span><span style="color: #b22222;"> * </span>
+<span class="linenr"> 5:  </span><span style="color: #b22222;"> * tcp_is_sack - SACK enabled </span>
+<span class="linenr"> 6:  </span><span style="color: #b22222;"> * tcp_is_reno - No SACK </span>
+<span class="linenr"> 7:  </span><span style="color: #b22222;"> * tcp_is_fack - FACK enabled, implies SACK enabled </span>
+<span class="linenr"> 8:  </span><span style="color: #b22222;"> </span><span style="color: #b22222;">*/</span>  
+<span class="linenr"> 9:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_is_sack</span> <span style="color: #cd2626;">(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #cd2626;">)</span>  
+<span class="linenr">10:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr">11:  </span>        <span style="color: #a020f0;">return</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">rx_opt</span><span style="color: #8b6508;">.</span><span style="color: #008000;">sack_ok</span><span style="color: #8b6508;">;</span> <span style="color: #b22222;">/* </span><span style="color: #b22222;">SACK seen on SYN packet </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">12:  </span><span style="color: #cd2626;">}</span>
+<span class="linenr">13:  </span>
+<span class="linenr">14:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">Look for tcp options. Normally only called on SYN and SYNACK packets.</span>
+<span class="linenr">15:  </span><span style="color: #b22222;"> * But, this can also be called on packets in the established flow when</span>
+<span class="linenr">16:  </span><span style="color: #b22222;"> * the fast version below fails.</span>
+<span class="linenr">17:  </span><span style="color: #b22222;"> </span><span style="color: #b22222;">*/</span>
+<span class="linenr">18:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_parse_options</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_options_received</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">opt_rx</span><span style="color: #8b6508;">,</span>
+<span class="linenr">19:  </span>             <span style="color: #228b22;">int</span> <span style="color: #a0522d;">estab</span><span style="color: #cd2626;">)</span>
+<span class="linenr">20:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">21:  </span>  <span style="color: #8b6508;">............</span>  
+<span class="linenr">22:  </span>  <span style="color: #a020f0;">case</span> TCPOPT_SACK_PERM<span style="color: #8b6508;">:</span>
+<span class="linenr">23:  </span>      <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>opsize <span style="color: #8b6508;">==</span> TCPOLEN_SACK_PERM <span style="color: #8b6508;">&amp;&amp;</span> th<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">syn</span> <span style="color: #8b6508;">&amp;&amp;</span>
+<span class="linenr">24:  </span>          !estab <span style="color: #8b6508;">&amp;&amp;</span> sysctl_tcp_sack<span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">25:  </span>          opt_rx<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">sack_ok</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">1</span><span style="color: #8b6508;">;</span> <span style="color: #b22222;">/* </span><span style="color: #b22222;">&#20174;syn&#21253;&#30340;&#36873;&#39033;&#20013;&#21327;&#21830;&#19982;sysctl_tcp_sack&#37197;&#32622; </span><span style="color: #b22222;">*/</span>
+<span class="linenr">26:  </span>          <span style="color: #008000; font-weight: bold;">tcp_sack_reset</span><span style="color: #cd2626;">(</span>opt_rx<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">27:  </span>      <span style="color: #cd2626;">}</span>
+<span class="linenr">28:  </span>      <span style="color: #a020f0;">break</span><span style="color: #8b6508;">;</span>
+<span class="linenr">29:  </span>  <span style="color: #8b6508;">............</span>
+<span class="linenr">30:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_is_reno</span> <span style="color: #cd2626;">(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #cd2626;">)</span>  
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr">3:  </span>        <span style="color: #a020f0;">return</span> ! <span style="color: #008000; font-weight: bold;">tcp_is_sack</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  <span style="color: #b22222;">/* </span><span style="color: #b22222;">&#19981;&#26159;sack&#23601;&#26159;newReno </span><span style="color: #b22222;">*/</span>
+<span class="linenr">4:  </span><span style="color: #cd2626;">}</span>  
+</pre>
+
+
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_is_fack</span> <span style="color: #cd2626;">(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #cd2626;">)</span>  
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr"> 3:  </span>        <span style="color: #a020f0;">return</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">rx_opt</span><span style="color: #8b6508;">.</span><span style="color: #008000;">sack_ok</span> <span style="color: #8b6508;">&amp;</span> <span style="color: #ff0000;">2</span><span style="color: #8b6508;">;</span>  
+<span class="linenr"> 4:  </span><span style="color: #cd2626;">}</span>
+<span class="linenr"> 5:  </span>
+<span class="linenr"> 6:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">&#23458;&#25143;&#31471;&#20351;&#33021;fack. </span><span style="color: #b22222;">*/</span>
+<span class="linenr"> 7:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_rcv_synsent_state_process</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #8b6508;">,</span>
+<span class="linenr"> 8:  </span>                   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcphdr</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">th</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">unsigned</span> <span style="color: #a0522d;">len</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 9:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">10:  </span><span style="color: #8b6508;">......</span>
+<span class="linenr">11:  </span>  <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span><span style="color: #008000; font-weight: bold;">tcp_is_sack</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">&amp;&amp;</span> sysctl_tcp_fack<span style="color: #cd2626;">)</span>
+<span class="linenr">12:  </span>      <span style="color: #008000; font-weight: bold;">tcp_enable_fack</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">13:  </span><span style="color: #8b6508;">......</span>
+<span class="linenr">14:  </span><span style="color: #cd2626;">}</span>
+<span class="linenr">15:  </span>
+<span class="linenr">16:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">&#26381;&#21153;&#31471;&#20351;&#33021;fack. </span><span style="color: #b22222;">*/</span>
+<span class="linenr">17:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">This is not only more efficient than what we used to do, it eliminates</span>
+<span class="linenr">18:  </span><span style="color: #b22222;"> * a lot of code duplication between IPv4/IPv6 SYN recv processing. -DaveM</span>
+<span class="linenr">19:  </span><span style="color: #b22222;"> *</span>
+<span class="linenr">20:  </span><span style="color: #b22222;"> * Actually, we could lots of memory writes here. tp of listening</span>
+<span class="linenr">21:  </span><span style="color: #b22222;"> * socket contains all necessary default parameters.</span>
+<span class="linenr">22:  </span><span style="color: #b22222;"> </span><span style="color: #b22222;">*/</span>
+<span class="linenr">23:  </span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">tcp_create_openreq_child</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">request_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">req</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #cd2626;">)</span>
+<span class="linenr">24:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">25:  </span><span style="color: #8b6508;">......</span>
+<span class="linenr">26:  </span>  <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">((</span>newtp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">rx_opt</span><span style="color: #8b6508;">.</span><span style="color: #008000;">sack_ok</span> <span style="color: #8b6508;">=</span> ireq<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">sack_ok</span><span style="color: #cd2626;">)</span> <span style="color: #8b6508;">!=</span> <span style="color: #ff0000;">0</span><span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">27:  </span>      <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>sysctl_tcp_fack<span style="color: #cd2626;">)</span>
+<span class="linenr">28:  </span>          <span style="color: #008000; font-weight: bold;">tcp_enable_fack</span><span style="color: #cd2626;">(</span>newtp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">29:  </span>  <span style="color: #cd2626;">}</span>
+<span class="linenr">30:  </span><span style="color: #8b6508;">......</span>
+<span class="linenr">31:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_enable_fack</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #cd2626;">)</span>  
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr">3:  </span>        tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">rx_opt</span><span style="color: #8b6508;">.</span><span style="color: #008000;">sack_ok</span> <span style="color: #8b6508;">|=</span> <span style="color: #ff0000;">2</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">4:  </span><span style="color: #cd2626;">}</span>  
+</pre>
+
+
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_fackets_out</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span><span style="color: #cd2626;">)</span>  
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr">3:  </span>        <span style="color: #a020f0;">return</span> <span style="color: #008000; font-weight: bold;">tcp_is_reno</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span> ? tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">sacked_out</span> <span style="color: #8b6508;">+</span><span style="color: #ff0000;">1</span> <span style="color: #8b6508;">:</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">fackets_out</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">4:  </span><span style="color: #cd2626;">}</span>  
+</pre>
+
+  （1）如果启用了FACK，那么fackets_out = left_out<br/>
+             fackets_out = sacked_out + loss_out<br/>
+             所以：loss_out = fackets_out - sacked_out<br/>
+            这是一种比较激进的丢包估算，即FACK。<br/>
+  （2）如果没启用FACK，那么就假设只丢了一个数据包，所以left_out = sacked_out + 1<br/>
+          这是一种较为保守的做法，当出现大量丢包时，这种做法会出现问题。    <br/>
+</p>
+<p>   <br/>
+</p>
+<p>   <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4" class="outline-3">
+<h3 id="sec-7-4"><span class="section-number-3">7.4</span> 慢启动</h3>
+<div class="outline-text-3" id="text-7-4">
 
 
 </div>
 
-<div id="outline-container-7-3-1" class="outline-4">
-<h4 id="sec-7-3-1"><span class="section-number-4">7.3.1</span> 连接建立时</h4>
-<div class="outline-text-4" id="text-7-3-1">
+<div id="outline-container-7-4-1" class="outline-4">
+<h4 id="sec-7-4-1"><span class="section-number-4">7.4.1</span> 连接建立时</h4>
+<div class="outline-text-4" id="text-7-4-1">
 
 <p>    在建立连接时，做为服务器端会通过tcp_v4_do_rcv（）－－》tcp_v4_hnd_req（）－－》tcp_che <br/>
     ck_req（）－－－》inet_csk(sk)-&gt;icsk_af_ops-&gt;syn_recv_sock（） <br/>
@@ -1895,9 +2005,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-2" class="outline-4">
-<h4 id="sec-7-3-2"><span class="section-number-4">7.3.2</span> tcp_ack()</h4>
-<div class="outline-text-4" id="text-7-3-2">
+<div id="outline-container-7-4-2" class="outline-4">
+<h4 id="sec-7-4-2"><span class="section-number-4">7.4.2</span> tcp_ack()</h4>
+<div class="outline-text-4" id="text-7-4-2">
 
 <p>    这个函数主要功能是： <br/>
     1 update重传队列，并基于sack来设置skb的相关buf。 <br/>
@@ -1907,9 +2017,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-3" class="outline-4">
-<h4 id="sec-7-3-3"><span class="section-number-4">7.3.3</span> 拥塞控制入口</h4>
-<div class="outline-text-4" id="text-7-3-3">
+<div id="outline-container-7-4-3" class="outline-4">
+<h4 id="sec-7-4-3"><span class="section-number-4">7.4.3</span> 拥塞控制入口</h4>
+<div class="outline-text-4" id="text-7-4-3">
 
 <p>    每接收到一个传输数据包的响应ack包进入tcp_cong_avoid()中判读该进行慢启动还是拥塞避免处理流程。<br/>
 </p>
@@ -1935,9 +2045,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-4" class="outline-4">
-<h4 id="sec-7-3-4"><span class="section-number-4">7.3.4</span> snd_ssthresh设置</h4>
-<div class="outline-text-4" id="text-7-3-4">
+<div id="outline-container-7-4-4" class="outline-4">
+<h4 id="sec-7-4-4"><span class="section-number-4">7.4.4</span> snd_ssthresh设置</h4>
+<div class="outline-text-4" id="text-7-4-4">
 
 <p>    这个值在加载cubic模块的时候可以传递一个我们制定的值给它，不过，默认是很大的值，我这里是2147483647,然后在接收ack期间(slow start)期间会调整这个值，<br/>
     在cubic中，默认是16（一般来说说当拥塞窗口到达16的时候，snd_ssthresh会被设置为16).<br/>
@@ -1992,18 +2102,18 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-5" class="outline-4">
-<h4 id="sec-7-3-5"><span class="section-number-4">7.3.5</span> snd_cwnd_clamp设置</h4>
-<div class="outline-text-4" id="text-7-3-5">
+<div id="outline-container-7-4-5" class="outline-4">
+<h4 id="sec-7-4-5"><span class="section-number-4">7.4.5</span> snd_cwnd_clamp设置</h4>
+<div class="outline-text-4" id="text-7-4-5">
 
 <p>    关于snd_cwnd_clamp变量，在《linux内核源码剖析——TCP/IP实现（下册）》p717，讲到：snd_cwnd_clamp是允许的拥塞窗口最大值，初始值为65535，之后再接收SYN和ACK段时，<br/>
     会根据条件确定是否从路由配置项读取信息更新该字段，最后在TCP连接复位前，将更新后的值根据某种算法计算后再更新回相对应的路由配置项中，便于连接使用。<br/>
 </p>
 </div>
 
-<div id="outline-container-7-3-5-1" class="outline-5">
-<h5 id="sec-7-3-5-1"><span class="section-number-5">7.3.5.1</span> 初始值后第一次修改</h5>
-<div class="outline-text-5" id="text-7-3-5-1">
+<div id="outline-container-7-4-5-1" class="outline-5">
+<h5 id="sec-7-4-5-1"><span class="section-number-5">7.4.5.1</span> 初始值后第一次修改</h5>
+<div class="outline-text-5" id="text-7-4-5-1">
 
 <p>     啥时候第一次修改的路由配置项还不清楚。<br/>
 </p>
@@ -2012,9 +2122,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-5-2" class="outline-5">
-<h5 id="sec-7-3-5-2"><span class="section-number-5">7.3.5.2</span> 连接复位前更新</h5>
-<div class="outline-text-5" id="text-7-3-5-2">
+<div id="outline-container-7-4-5-2" class="outline-5">
+<h5 id="sec-7-4-5-2"><span class="section-number-5">7.4.5.2</span> 连接复位前更新</h5>
+<div class="outline-text-5" id="text-7-4-5-2">
 
 <ul>
 <li>客户端<br/>
@@ -2107,9 +2217,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-6" class="outline-4">
-<h4 id="sec-7-3-6"><span class="section-number-4">7.3.6</span> 拥塞控制实现</h4>
-<div class="outline-text-4" id="text-7-3-6">
+<div id="outline-container-7-4-6" class="outline-4">
+<h4 id="sec-7-4-6"><span class="section-number-4">7.4.6</span> 拥塞控制实现</h4>
+<div class="outline-text-4" id="text-7-4-6">
 
 
 <p><br/>
@@ -2141,9 +2251,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-7" class="outline-4">
-<h4 id="sec-7-3-7"><span class="section-number-4">7.3.7</span> 慢启动算法</h4>
-<div class="outline-text-4" id="text-7-3-7">
+<div id="outline-container-7-4-7" class="outline-4">
+<h4 id="sec-7-4-7"><span class="section-number-4">7.4.7</span> 慢启动算法</h4>
+<div class="outline-text-4" id="text-7-4-7">
 
 
     <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
@@ -2191,9 +2301,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-3-8" class="outline-4">
-<h4 id="sec-7-3-8"><span class="section-number-4">7.3.8</span> 备注</h4>
-<div class="outline-text-4" id="text-7-3-8">
+<div id="outline-container-7-4-8" class="outline-4">
+<h4 id="sec-7-4-8"><span class="section-number-4">7.4.8</span> 备注</h4>
+<div class="outline-text-4" id="text-7-4-8">
 
 <p>    这里着重解释一下，cwnd的指数增长是如何进行的，所有的文献中都会提到，cwnd在一个RTT内会翻倍，这里看到的源码似乎不是这样，而是接收一个ACK就加一。<br/>
     这里疑惑了一下，接收一个ACK的时间不就是RTT吗？其实不是的，一个cwnd内的包是一起发送的，之间相关的时间很短，只和带宽有关，ACK也是连续返回的，<br/>
@@ -2205,16 +2315,16 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4" class="outline-3">
-<h3 id="sec-7-4"><span class="section-number-3">7.4</span> 拥塞避免</h3>
-<div class="outline-text-3" id="text-7-4">
+<div id="outline-container-7-5" class="outline-3">
+<h3 id="sec-7-5"><span class="section-number-3">7.5</span> 拥塞避免</h3>
+<div class="outline-text-3" id="text-7-5">
 
 
 </div>
 
-<div id="outline-container-7-4-1" class="outline-4">
-<h4 id="sec-7-4-1"><span class="section-number-4">7.4.1</span> 拥塞避免算法</h4>
-<div class="outline-text-4" id="text-7-4-1">
+<div id="outline-container-7-5-1" class="outline-4">
+<h4 id="sec-7-5-1"><span class="section-number-4">7.5.1</span> 拥塞避免算法</h4>
+<div class="outline-text-4" id="text-7-5-1">
 
 <p>    通过判断当前的拥塞窗口下已经发送的数据段的个数是否大于算法计算出来的值w，如果大于我们才能增加拥塞窗口值，否则之需要增加snd_cwnd_cnt。<br/>
 </p>
@@ -2238,9 +2348,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-5" class="outline-3">
-<h3 id="sec-7-5"><span class="section-number-3">7.5</span> 快速重传</h3>
-<div class="outline-text-3" id="text-7-5">
+<div id="outline-container-7-6" class="outline-3">
+<h3 id="sec-7-6"><span class="section-number-3">7.6</span> 快速重传</h3>
+<div class="outline-text-3" id="text-7-6">
 
 <p>   快速重传：tcp_ack中的丢包检测，即检测到连续3个重复ACK。<br/>
    超时重传是TCP协议保证数据可靠性的一个重要机制，其原理是在发送一个数据以后就开启一个计时器，<br/>
@@ -2254,9 +2364,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-5-1" class="outline-4">
-<h4 id="sec-7-5-1"><span class="section-number-4">7.5.1</span> 快速重传做的事情有：</h4>
-<div class="outline-text-4" id="text-7-5-1">
+<div id="outline-container-7-6-1" class="outline-4">
+<h4 id="sec-7-6-1"><span class="section-number-4">7.6.1</span> 快速重传做的事情有：</h4>
+<div class="outline-text-4" id="text-7-6-1">
 
 <ol>
 <li>把ssthresh设置为cwnd的一半<br/>
@@ -2271,9 +2381,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-5-2" class="outline-4">
-<h4 id="sec-7-5-2"><span class="section-number-4">7.5.2</span> 第一个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-5-2">
+<div id="outline-container-7-6-2" class="outline-4">
+<h4 id="sec-7-6-2"><span class="section-number-4">7.6.2</span> 第一个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-6-2">
 
 <p>    现在的TCP协议中默认都是支持SACK,FACK,D-SACK的 。用sysctl -a|grep ack 就可知道。 <br/>
     但具体到一个连接的支持情况还要看三次握手，只要双方都支持了SACK，FACK就会自动打开，只有有一方不支持SACK，连接就处于最基本的reno方法的拥塞控制。 <br/>
@@ -2446,9 +2556,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-5-3" class="outline-4">
-<h4 id="sec-7-5-3"><span class="section-number-4">7.5.3</span> 第2个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-5-3">
+<div id="outline-container-7-6-3" class="outline-4">
+<h4 id="sec-7-6-3"><span class="section-number-4">7.6.3</span> 第2个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-6-3">
 
 <p>   在不增加窗口大小的情况下，本ACK包还是会通过FASTPATH进入tcp_ack()函数。在增加了sacked_out后与第一个重复的ACK一样就返回了。 <br/>
 </p>
@@ -2457,9 +2567,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-5-4" class="outline-4">
-<h4 id="sec-7-5-4"><span class="section-number-4">7.5.4</span> 第3个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-5-4">
+<div id="outline-container-7-6-4" class="outline-4">
+<h4 id="sec-7-6-4"><span class="section-number-4">7.6.4</span> 第3个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-6-4">
 
 <p>   该ACK包与前2个包不同之处是：这个包要更新拥塞控制的状态了，这个就是经典的RENO：3个重复ACK引发重传。<br/>
     <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
@@ -2606,9 +2716,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-6" class="outline-3">
-<h3 id="sec-7-6"><span class="section-number-3">7.6</span> 快速恢复</h3>
-<div class="outline-text-3" id="text-7-6">
+<div id="outline-container-7-7" class="outline-3">
+<h3 id="sec-7-7"><span class="section-number-3">7.7</span> 快速恢复</h3>
+<div class="outline-text-3" id="text-7-7">
 
 <p>   后来的“快速恢复”算法是在上述的“快速重传”算法后添加的，当收到3个重复ACK时，TCP最后进入的不是拥塞避免阶段，而是快速恢复阶段。<br/>
    快速重传和快速恢复算法一般同时使用。快速恢复的思想是“数据包守恒”原则，即同一个时刻在网络中的数据包数量是恒定的，只有当“老”数<br/>
@@ -2617,9 +2727,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-6-1" class="outline-4">
-<h4 id="sec-7-6-1"><span class="section-number-4">7.6.1</span> 具体来说快速恢复的主要步骤是：</h4>
-<div class="outline-text-4" id="text-7-6-1">
+<div id="outline-container-7-7-1" class="outline-4">
+<h4 id="sec-7-7-1"><span class="section-number-4">7.7.1</span> 具体来说快速恢复的主要步骤是：</h4>
+<div class="outline-text-4" id="text-7-7-1">
 
 <ol>
 <li>当收到3个重复ACK时，把ssthresh设置为cwnd的一半，把cwnd设置为ssthresh的值加3，然后重传丢失的报文段，加3的原因是因为<br/>
@@ -2642,9 +2752,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-7" class="outline-3">
-<h3 id="sec-7-7"><span class="section-number-3">7.7</span> 拥塞状态机</h3>
-<div class="outline-text-3" id="text-7-7">
+<div id="outline-container-7-8" class="outline-3">
+<h3 id="sec-7-8"><span class="section-number-3">7.8</span> 拥塞状态机</h3>
+<div class="outline-text-3" id="text-7-8">
 
 <p>　拥塞状态机处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:<br/>
 　- each incoming ACK, if state is not “Open”(每个处于非OPEN状态的ack包)<br/>
@@ -3178,9 +3288,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8" class="outline-3">
-<h3 id="sec-7-8"><span class="section-number-3">7.8</span> 拥塞事件</h3>
-<div class="outline-text-3" id="text-7-8">
+<div id="outline-container-7-9" class="outline-3">
+<h3 id="sec-7-9"><span class="section-number-3">7.9</span> 拥塞事件</h3>
+<div class="outline-text-3" id="text-7-9">
 
 <p>　　　TCP定义了几个拥塞事件，当这些事件发生时，我们可以通过TCP的拥塞控制算法，调用自定义的处理函数，<br/>
 　　　来做一些额外的事情的。也就是说，我们可以很简便的参与到TCP对拥塞事件的处理过程中。<br/>
@@ -3188,9 +3298,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-8-1" class="outline-4">
-<h4 id="sec-7-8-1"><span class="section-number-4">7.8.1</span> TCP的拥塞事件集</h4>
-<div class="outline-text-4" id="text-7-8-1">
+<div id="outline-container-7-9-1" class="outline-4">
+<h4 id="sec-7-9-1"><span class="section-number-4">7.9.1</span> TCP的拥塞事件集</h4>
+<div class="outline-text-4" id="text-7-9-1">
 
 
 <p><br/>
@@ -3212,9 +3322,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-2" class="outline-4">
-<h4 id="sec-7-8-2"><span class="section-number-4">7.8.2</span> 钩子函数定义</h4>
-<div class="outline-text-4" id="text-7-8-2">
+<div id="outline-container-7-9-2" class="outline-4">
+<h4 id="sec-7-9-2"><span class="section-number-4">7.9.2</span> 钩子函数定义</h4>
+<div class="outline-text-4" id="text-7-9-2">
 
 
 <p><br/>
@@ -3232,9 +3342,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-3" class="outline-4">
-<h4 id="sec-7-8-3"><span class="section-number-4">7.8.3</span> 封装调用</h4>
-<div class="outline-text-4" id="text-7-8-3">
+<div id="outline-container-7-9-3" class="outline-4">
+<h4 id="sec-7-9-3"><span class="section-number-4">7.9.3</span> 封装调用</h4>
+<div class="outline-text-4" id="text-7-9-3">
 
 
 <p><br/>
@@ -3252,9 +3362,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-4" class="outline-4">
-<h4 id="sec-7-8-4"><span class="section-number-4">7.8.4</span> CA_EVENT_TX_START</h4>
-<div class="outline-text-4" id="text-7-8-4">
+<div id="outline-container-7-9-4" class="outline-4">
+<h4 id="sec-7-9-4"><span class="section-number-4">7.9.4</span> CA_EVENT_TX_START</h4>
+<div class="outline-text-4" id="text-7-9-4">
 
 <p>　　　当发送一个数据包时，如果网络中无发送且未确认的数据包，则触发此事件。<br/>
 </p>
@@ -3278,9 +3388,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-5" class="outline-4">
-<h4 id="sec-7-8-5"><span class="section-number-4">7.8.5</span> CA_EVENT_CWND_RESTART</h4>
-<div class="outline-text-4" id="text-7-8-5">
+<div id="outline-container-7-9-5" class="outline-4">
+<h4 id="sec-7-9-5"><span class="section-number-4">7.9.5</span> CA_EVENT_CWND_RESTART</h4>
+<div class="outline-text-4" id="text-7-9-5">
 
 <p>　　　发送方在发送数据包时，如果发送的数据包有负载，则会检测拥塞窗口是否超时。<br/>
 　　　如果超时，则会使拥塞窗口失效并重新计算拥塞窗口，同时触发CA_EVENT_CWND_RESTART事件。<br/>
@@ -3339,9 +3449,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-6" class="outline-4">
-<h4 id="sec-7-8-6"><span class="section-number-4">7.8.6</span> CA_EVENT_COMPLETE_CWR</h4>
-<div class="outline-text-4" id="text-7-8-6">
+<div id="outline-container-7-9-6" class="outline-4">
+<h4 id="sec-7-9-6"><span class="section-number-4">7.9.6</span> CA_EVENT_COMPLETE_CWR</h4>
+<div class="outline-text-4" id="text-7-9-6">
 
 <p>　　　当退出CWR状态，或者退出Recovery状态时，会调用tcp_complete_cwr()来设置拥塞窗口，这个时候<br/>
 　　　会触发CA_EVENT_COMPLETE_CWR来通知拥塞控制模块：“我已经停止减小拥塞窗口了！如果你想<br/>
@@ -3371,9 +3481,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-7" class="outline-4">
-<h4 id="sec-7-8-7"><span class="section-number-4">7.8.7</span> CA_EVENT_FRTO</h4>
-<div class="outline-text-4" id="text-7-8-7">
+<div id="outline-container-7-9-7" class="outline-4">
+<h4 id="sec-7-9-7"><span class="section-number-4">7.9.7</span> CA_EVENT_FRTO</h4>
+<div class="outline-text-4" id="text-7-9-7">
 
 <p>　　　启用F-RTO时，发生超时后，首先会进行F-RTO处理，看看这个超时是不是虚假的，如果不是的话<br/>
 　　　再进行传统的超时重传。这时候会减小慢启动阈值，而拥塞窗口暂时保持不变。<br/>
@@ -3416,9 +3526,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-8" class="outline-4">
-<h4 id="sec-7-8-8"><span class="section-number-4">7.8.8</span> CA_EVENT_LOSS</h4>
-<div class="outline-text-4" id="text-7-8-8">
+<div id="outline-container-7-9-8" class="outline-4">
+<h4 id="sec-7-9-8"><span class="section-number-4">7.9.8</span> CA_EVENT_LOSS</h4>
+<div class="outline-text-4" id="text-7-9-8">
 
 <p>　　　上面我们说到，如果超时不是虚假的话，就会进入超时重传，也就是TCP_CA_Loss状态。<br/>
 </p>
@@ -3458,9 +3568,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-9" class="outline-4">
-<h4 id="sec-7-8-9"><span class="section-number-4">7.8.9</span> CA_EVENT_FAST_ACK</h4>
-<div class="outline-text-4" id="text-7-8-9">
+<div id="outline-container-7-9-9" class="outline-4">
+<h4 id="sec-7-9-9"><span class="section-number-4">7.9.9</span> CA_EVENT_FAST_ACK</h4>
+<div class="outline-text-4" id="text-7-9-9">
 
 <p>　　　如果我们收到符合预期的ACK，那么就进入快速路径的处理流程，在tcp_ack()中进行负荷无关的处理，<br/>
 　　　同时触发CA_EVENT_FAST_ACK事件。<br/>
@@ -3492,9 +3602,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-10" class="outline-4">
-<h4 id="sec-7-8-10"><span class="section-number-4">7.8.10</span> CA_EVENT_SLOW_ACK</h4>
-<div class="outline-text-4" id="text-7-8-10">
+<div id="outline-container-7-9-10" class="outline-4">
+<h4 id="sec-7-9-10"><span class="section-number-4">7.9.10</span> CA_EVENT_SLOW_ACK</h4>
+<div class="outline-text-4" id="text-7-9-10">
 
 <p>　　　如果我们收到不符合预期的ACK，那么就不能走快速路径，而必须经过全面的检查，即进入慢速路径的<br/>
 　　　处理流程。同样在tcp_ack()中进行负荷无关的处理，同时触发CA_EVENT_SLOW_ACK事件。<br/>
@@ -3534,9 +3644,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-11" class="outline-4">
-<h4 id="sec-7-8-11"><span class="section-number-4">7.8.11</span> 阈值的设置</h4>
-<div class="outline-text-4" id="text-7-8-11">
+<div id="outline-container-7-9-11" class="outline-4">
+<h4 id="sec-7-9-11"><span class="section-number-4">7.9.11</span> 阈值的设置</h4>
+<div class="outline-text-4" id="text-7-9-11">
 
 <p>　　　用拥塞算法的ssthresh()来设置慢启动阈值tp-&gt;snd_ssthresh。<br/>
 　　　（1）tcp_enter_cwr<br/>
@@ -3665,7 +3775,7 @@ for the JavaScript code in this tag.
 </div>
 
 <div id="postamble">
-<p class="date">Date: 2014-10-20T16:32+0800</p>
+<p class="date">Date: 2014-10-20T17:52+0800</p>
 <p class="author">Author: mosp</p>
 <p class="creator"><a href="http://orgmode.org">Org</a> version 7.9.3f with <a href="http://www.gnu.org/software/emacs/">Emacs</a> version 24</p>
 <a href="http://validator.w3.org/check?uri=referer">Validate XHTML 1.0</a>

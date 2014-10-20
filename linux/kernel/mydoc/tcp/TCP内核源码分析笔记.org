@@ -1229,7 +1229,101 @@ out_err:
    tcp_rcv_synsent_state_process[5472] tcp_init_metrics(sk);
    tcp_rcv_state_process[5713]    tcp_init_metrics(sk);
    -------------------------------------------------------------------------------
+   
+** SACK/RENO/FACK是否启用
+ 	#+BEGIN_SRC c -n   
+  /* These function determine how the currrent flow behaves in respect of SACK 
+   * handling. SACK is negotiated with the peer, and therefore it can very between 
+   * different flows. 
+   * 
+   * tcp_is_sack - SACK enabled 
+   * tcp_is_reno - No SACK 
+   * tcp_is_fack - FACK enabled, implies SACK enabled 
+   */  
+  static inline int tcp_is_sack (const struct tcp_sock *tp)  
+  {  
+          return tp->rx_opt.sack_ok; /* SACK seen on SYN packet */  
+  }
 
+  /* Look for tcp options. Normally only called on SYN and SYNACK packets.
+   * But, this can also be called on packets in the established flow when
+   * the fast version below fails.
+   */
+  void tcp_parse_options(struct sk_buff *skb, struct tcp_options_received *opt_rx,
+   		       int estab)
+  {
+    ............  
+   	case TCPOPT_SACK_PERM:
+   		if (opsize == TCPOLEN_SACK_PERM && th->syn &&
+   		    !estab && sysctl_tcp_sack) {
+   			opt_rx->sack_ok = 1; /* 从syn包的选项中协商与sysctl_tcp_sack配置 */
+   			tcp_sack_reset(opt_rx);
+   		}
+   		break;
+    ............
+  }
+   #+END_SRC
+
+   #+BEGIN_SRC c -n      
+  static inline int tcp_is_reno (const struct tcp_sock *tp)  
+  {  
+          return ! tcp_is_sack(tp);  /* 不是sack就是newReno */
+  }  
+   #+END_SRC
+   #+BEGIN_SRC c -n      
+  static inline int tcp_is_fack (const struct tcp_sock *tp)  
+  {  
+          return tp->rx_opt.sack_ok & 2;  
+  }
+
+  /* 客户端使能fack. */
+  static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
+   					 struct tcphdr *th, unsigned len)
+  {
+  ......
+   	if (tcp_is_sack(tp) && sysctl_tcp_fack)
+   		tcp_enable_fack(tp);
+  ......
+  }
+   
+  /* 服务端使能fack. */
+  /* This is not only more efficient than what we used to do, it eliminates
+   * a lot of code duplication between IPv4/IPv6 SYN recv processing. -DaveM
+   *
+   * Actually, we could lots of memory writes here. tp of listening
+   * socket contains all necessary default parameters.
+   */
+  struct sock *tcp_create_openreq_child(struct sock *sk, struct request_sock *req, struct sk_buff *skb)
+  {
+  ......
+   	if ((newtp->rx_opt.sack_ok = ireq->sack_ok) != 0) {
+   		if (sysctl_tcp_fack)
+   			tcp_enable_fack(newtp);
+   	}
+  ......
+  }
+   #+END_SRC
+
+   #+BEGIN_SRC c -n      
+  static inline void tcp_enable_fack(struct tcp_sock *tp)  
+  {  
+          tp->rx_opt.sack_ok |= 2;  
+  }  
+   #+END_SRC
+   #+BEGIN_SRC c -n      
+  static inline int tcp_fackets_out(const struct tcp_sock *tp)  
+  {  
+          return tcp_is_reno(tp) ? tp->sacked_out +1 : tp->fackets_out;  
+  }  
+   #+END_SRC
+  （1）如果启用了FACK，那么fackets_out = left_out
+             fackets_out = sacked_out + loss_out
+             所以：loss_out = fackets_out - sacked_out
+            这是一种比较激进的丢包估算，即FACK。
+  （2）如果没启用FACK，那么就假设只丢了一个数据包，所以left_out = sacked_out + 1
+          这是一种较为保守的做法，当出现大量丢包时，这种做法会出现问题。    
+   
+   
 ** 慢启动
 *** 连接建立时
     在建立连接时，做为服务器端会通过tcp_v4_do_rcv（）－－》tcp_v4_hnd_req（）－－》tcp_che 
@@ -2288,7 +2382,7 @@ out_err:
 　　　来做一些额外的事情的。也就是说，我们可以很简便的参与到TCP对拥塞事件的处理过程中。
 　　　 
 *** TCP的拥塞事件集
-	#+BEGIN_SRC c -n 	
+	#+BEGIN_SRC c -n 	 
 　　　 	/* Events passed to congestion control interface */  
 　　　 	  
 　　　 	enum tcp_ca_event {  
@@ -2303,7 +2397,7 @@ out_err:
 	#+END_SRC
 	　　　 
 *** 钩子函数定义
-	#+BEGIN_SRC c -n 
+	#+BEGIN_SRC c -n  
 　　　 	 struct tcp_congestion_ops {  
 　　　 	     ...  
 　　　 	   
@@ -2314,7 +2408,7 @@ out_err:
 　　　 	 };  
 	#+END_SRC　　　 
 *** 封装调用
-	#+BEGIN_SRC c -n 	
+	#+BEGIN_SRC c -n  	
 　　　 	static inline void tcp_ca_event (struct sock *sk, const enum tcp_ca_event event)  
 　　　 	{  
 　　　 	    const struct inet_connection_sock *icsk = inet_csk(sk);  
@@ -2326,7 +2420,7 @@ out_err:
 　　　 
 *** CA_EVENT_TX_START 
 　　　当发送一个数据包时，如果网络中无发送且未确认的数据包，则触发此事件。
-	#+BEGIN_SRC c -n 	
+	#+BEGIN_SRC c -n  	
 　　　 	static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it, gfp_t gfp_mask)  
 　　　 	{  
 　　　 	    ...  
@@ -2344,7 +2438,7 @@ out_err:
 *** CA_EVENT_CWND_RESTART 
 　　　发送方在发送数据包时，如果发送的数据包有负载，则会检测拥塞窗口是否超时。
 　　　如果超时，则会使拥塞窗口失效并重新计算拥塞窗口，同时触发CA_EVENT_CWND_RESTART事件。
-	#+BEGIN_SRC c -n 	
+	#+BEGIN_SRC c -n  	
 　　　 	/* Congestion state accounting after a packet has been sent. */  　　　 	  
 　　　 	static void tcp_event_data_sent(struct tcp_sock *tp, struct sock *sk)  
 　　　 	{  
@@ -2367,7 +2461,7 @@ out_err:
 　　　（1）tcp_slow_start_after_idle选项设置，这个内核默认置为1
 　　　（2）tp->packets_out == 0，表示网络中没有未确认数据包
 　　　（3）now - tp->lsndtime > icsk->icsk_rto，距离上次发送数据包的时间超过了RTO
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　 	/* RFC2861. Reset CWND after idle period longer than RTO to "restart window". 
 　　　 	 * This is the first part of cwnd validation mechanism. 
 　　　 	 */  
@@ -2395,7 +2489,7 @@ out_err:
 　　　当退出CWR状态，或者退出Recovery状态时，会调用tcp_complete_cwr()来设置拥塞窗口，这个时候
 　　　会触发CA_EVENT_COMPLETE_CWR来通知拥塞控制模块：“我已经停止减小拥塞窗口了！如果你想
 　　　再做点什么补充，就是现在！”
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　	static inline void tcp_complete_cwr(struct sock *sk)  
 　　　	{
 　　　	   struct tcp_sock *tp = tcp_sk(sk);  
@@ -2417,7 +2511,7 @@ out_err:
 *** CA_EVENT_FRTO 
 　　　启用F-RTO时，发生超时后，首先会进行F-RTO处理，看看这个超时是不是虚假的，如果不是的话
 　　　再进行传统的超时重传。这时候会减小慢启动阈值，而拥塞窗口暂时保持不变。
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　/* RTO occurred, but do not yet enter Loss state. Instead, defer RTO recovery a bit and use 
 　　　 * heuristics in tcp_process_frto() to detect if the RTO was spurious. 
 　　　 */  
@@ -2452,7 +2546,7 @@ out_err:
 	#+END_SRC　　　 
 *** CA_EVENT_LOSS 
 　　　上面我们说到，如果超时不是虚假的话，就会进入超时重传，也就是TCP_CA_Loss状态。
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　/* Enter Loss state. If "how" is not zero, forget all SACK information and reset tags completely, 
 　　　 * otherwise preserve SACKs. If receiver dropped its ofo queue, we will know this due to 
 　　　 * reneging detection. 
@@ -2486,7 +2580,7 @@ out_err:
 *** CA_EVENT_FAST_ACK 	
 　　　如果我们收到符合预期的ACK，那么就进入快速路径的处理流程，在tcp_ack()中进行负荷无关的处理，
 　　　同时触发CA_EVENT_FAST_ACK事件。
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)  
 　　　{  
 　　　    ...  
@@ -2511,7 +2605,7 @@ out_err:
 *** CA_EVENT_SLOW_ACK	
 　　　如果我们收到不符合预期的ACK，那么就不能走快速路径，而必须经过全面的检查，即进入慢速路径的
 　　　处理流程。同样在tcp_ack()中进行负荷无关的处理，同时触发CA_EVENT_SLOW_ACK事件。
-	#+BEGIN_SRC c -n 	　　　 
+	#+BEGIN_SRC c -n  	　　　 
 　　　static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)  
 　　　{  
 　　　    ...  
