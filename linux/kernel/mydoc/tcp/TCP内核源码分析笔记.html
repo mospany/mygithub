@@ -7,7 +7,7 @@
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="title" content="TCP内核源码分析笔记"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2014-10-20T17:52+0800"/>
+<meta name="generated" content="2014-10-21T09:58+0800"/>
 <meta name="author" content="mosp"/>
 <meta name="description" content=""/>
 <meta name="keywords" content="linux, kernel, tcp, 读书笔记， 网络管理"/>
@@ -214,7 +214,13 @@ for the JavaScript code in this tag.
 <li><a href="#sec-7-7-1">7.7.1 具体来说快速恢复的主要步骤是：</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-8">7.8 拥塞状态机</a></li>
+<li><a href="#sec-7-8">7.8 拥塞状态机</a>
+<ul>
+<li><a href="#sec-7-8-1">7.8.1 进入条件</a></li>
+<li><a href="#sec-7-8-2">7.8.2 状态机实现</a></li>
+<li><a href="#sec-7-8-3">7.8.3 退出条件</a></li>
+</ul>
+</li>
 <li><a href="#sec-7-9">7.9 拥塞事件</a>
 <ul>
 <li><a href="#sec-7-9-1">7.9.1 TCP的拥塞事件集</a></li>
@@ -2756,6 +2762,13 @@ for the JavaScript code in this tag.
 <h3 id="sec-7-8"><span class="section-number-3">7.8</span> 拥塞状态机</h3>
 <div class="outline-text-3" id="text-7-8">
 
+
+</div>
+
+<div id="outline-container-7-8-1" class="outline-4">
+<h4 id="sec-7-8-1"><span class="section-number-4">7.8.1</span> 进入条件</h4>
+<div class="outline-text-4" id="text-7-8-1">
+
 <p>　拥塞状态机处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:<br/>
 　- each incoming ACK, if state is not “Open”(每个处于非OPEN状态的ack包)<br/>
 </p><ul>
@@ -2771,6 +2784,14 @@ for the JavaScript code in this tag.
 
 </li>
 </ul>
+
+</div>
+
+</div>
+
+<div id="outline-container-7-8-2" class="outline-4">
+<h4 id="sec-7-8-2"><span class="section-number-4">7.8.2</span> 状态机实现</h4>
+<div class="outline-text-4" id="text-7-8-2">
 
 <p>  在tcp_ack()中调用的，进入这个函数就意味着我们碰到了拥塞状态或者在拥塞状态处理tcp。在这个函数中，实现了下面的这些算法： <br/>
   1 失败重传。 <br/>
@@ -3288,6 +3309,62 @@ for the JavaScript code in this tag.
 
 </div>
 
+<div id="outline-container-7-8-3" class="outline-4">
+<h4 id="sec-7-8-3"><span class="section-number-4">7.8.3</span> 退出条件</h4>
+<div class="outline-text-4" id="text-7-8-3">
+
+<p>   各状态的退出时机：tp-&gt;snd_una &gt;= tp-&gt;high_seq<br/>
+</p>
+<p>    <br/>
+   （1） Open<br/>
+   因为Open态是正常态，所以无所谓退出，保持原样。<br/>
+</p>
+<p>    <br/>
+   （2）Loss<br/>
+   icsk-&gt;icsk_retransmits = 0; <i>*超时重传次数归0*</i><br/>
+   tcp_try_undo_recovery(sk);<br/>
+   检查是否需要undo，不管undo成功与否，都返回Open态。<br/>
+</p>
+<p>    <br/>
+   （3）CWR<br/>
+   If seq number greater than high_seq is acked, it indicates that the CWR indication has reached the peer TCP,<br/>
+   call tcp_complete_cwr() to bring down the cwnd to ssthresh value.<br/>
+   tcp_complete_cwr(sk)中：<br/>
+   tp-&gt;snd_cwnd = min(tp-&gt;snd_cwnd, tp-&gt;snd_ssthresh);<br/>
+</p>
+<p>    <br/>
+   （4）Disorder<br/>
+   启用sack，则tcp_try_undo_dsack(sk)，交给它处理。<br/>
+   否则，tp-&gt;undo_marker = 0;<br/>
+</p>
+<p>    <br/>
+   （5）Recovery<br/>
+   tcp_try_undo_recovery(sk);<br/>
+   在tcp_complete_cwr(sk)中：<br/>
+   tp-&gt;snd_cwnd = tp-&gt;snd_ssthresh;<br/>
+</p>
+<p><br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #b22222;">/*</span><span style="color: #b22222;">cwr&#29366;&#24577;&#25110;Recovery&#29366;&#24577;&#32467;&#26463;&#26102;&#35843;&#29992;&#65292;&#20943;&#23567;cwnd</span><span style="color: #b22222;">*/</span>   
+<span class="linenr">2:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_complete_cwr</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span>  
+<span class="linenr">3:  </span><span style="color: #cd2626;">{</span>  
+<span class="linenr">4:  </span>    <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">5:  </span>    tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">min</span><span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span><span style="color: #8b6508;">,</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">6:  </span>    tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_stamp</span> <span style="color: #8b6508;">=</span> tcp_time_stamp<span style="color: #8b6508;">;</span>  
+<span class="linenr">7:  </span>    <span style="color: #008000; font-weight: bold;">tcp_ca_event</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> CA_EVENT_COMPLETE_CWR<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">8:  </span><span style="color: #cd2626;">}</span>  
+</pre>
+
+</p>
+<p>    <br/>
+</p>
+<p>      <br/>
+</p></div>
+</div>
+
+</div>
+
 <div id="outline-container-7-9" class="outline-3">
 <h3 id="sec-7-9"><span class="section-number-3">7.9</span> 拥塞事件</h3>
 <div class="outline-text-3" id="text-7-9">
@@ -3775,7 +3852,7 @@ for the JavaScript code in this tag.
 </div>
 
 <div id="postamble">
-<p class="date">Date: 2014-10-20T17:52+0800</p>
+<p class="date">Date: 2014-10-21T09:58+0800</p>
 <p class="author">Author: mosp</p>
 <p class="creator"><a href="http://orgmode.org">Org</a> version 7.9.3f with <a href="http://www.gnu.org/software/emacs/">Emacs</a> version 24</p>
 <a href="http://validator.w3.org/check?uri=referer">Validate XHTML 1.0</a>

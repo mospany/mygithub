@@ -1886,12 +1886,14 @@ out_err:
    快速恢复：bictcp_undo_cwnd，直接把snd_cwnd更新为max(snd_cwnd，last_max_cwnd)，和掉包前相差不大。
 
 ** 拥塞状态机
+*** 进入条件   
 　拥塞状态机处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:
 　- each incoming ACK, if state is not “Open”(每个处于非OPEN状态的ack包)
   - when arrived ACK is unusual, namely: (异常的ack包类型如下)
     + SACK
     + Duplicate ACK.
     + ECN ECE.
+*** 状态机实现
   在tcp_ack()中调用的，进入这个函数就意味着我们碰到了拥塞状态或者在拥塞状态处理tcp。在这个函数中，实现了下面的这些算法： 
   1 失败重传。 
   2 从不同的拥塞状态恢复。 
@@ -2377,6 +2379,44 @@ out_err:
 	#+END_SRC
 	#+html: </div>
 
+*** 退出条件
+   各状态的退出时机：tp->snd_una >= tp->high_seq
+    
+   （1） Open
+   因为Open态是正常态，所以无所谓退出，保持原样。
+    
+   （2）Loss
+   icsk->icsk_retransmits = 0; /*超时重传次数归0*/
+   tcp_try_undo_recovery(sk);
+   检查是否需要undo，不管undo成功与否，都返回Open态。
+    
+   （3）CWR
+   If seq number greater than high_seq is acked, it indicates that the CWR indication has reached the peer TCP,
+   call tcp_complete_cwr() to bring down the cwnd to ssthresh value.
+   tcp_complete_cwr(sk)中：
+   tp->snd_cwnd = min(tp->snd_cwnd, tp->snd_ssthresh);
+    
+   （4）Disorder
+   启用sack，则tcp_try_undo_dsack(sk)，交给它处理。
+   否则，tp->undo_marker = 0;
+    
+   （5）Recovery
+   tcp_try_undo_recovery(sk);
+   在tcp_complete_cwr(sk)中：
+   tp->snd_cwnd = tp->snd_ssthresh;
+
+	#+BEGIN_SRC c -n    
+    /*cwr状态或Recovery状态结束时调用，减小cwnd*/   
+    static inline void tcp_complete_cwr(struct sock *sk)  
+    {  
+        struct tcp_sock *tp = tcp_sk(sk);  
+        tp->snd_cwnd = min(tp->snd_cwnd, tp->snd_ssthresh);  
+        tp->snd_cwnd_stamp = tcp_time_stamp;  
+        tcp_ca_event(sk, CA_EVENT_COMPLETE_CWR);  
+    }  
+	#+END_SRC
+	
+	  
 ** 拥塞事件	  
 　　　TCP定义了几个拥塞事件，当这些事件发生时，我们可以通过TCP的拥塞控制算法，调用自定义的处理函数，
 　　　来做一些额外的事情的。也就是说，我们可以很简便的参与到TCP对拥塞事件的处理过程中。
