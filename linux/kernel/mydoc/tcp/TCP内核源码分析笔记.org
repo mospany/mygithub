@@ -1322,7 +1322,407 @@ out_err:
             这是一种比较激进的丢包估算，即FACK。
   （2）如果没启用FACK，那么就假设只丢了一个数据包，所以left_out = sacked_out + 1
           这是一种较为保守的做法，当出现大量丢包时，这种做法会出现问题。    
-   
+
+** 拥塞控制结构体
+	#+BEGIN_SRC c -n	
+	struct tcp_congestion_ops {  
+	        struct list_head        list;  
+	        unsigned long flags;  
+	  
+	        /* initialize private data (optional) */  
+	        void (*init)(struct sock *sk);                    // 初始化  
+	        /* cleanup private data  (optional) */  
+	        void (*release)(struct sock *sk);                  // 清除数据  
+	  
+	         /* return slow start threshold (required) */  
+	         u32 (*ssthresh)(struct sock *sk);                // 返回慢开始门限  
+	         /* lower bound for congestion window (optional) */  
+	         u32 (*min_cwnd)(const struct sock *sk);          // 拥塞窗口最小值  
+	         /* do new cwnd calculation (required) */  
+	         void (*cong_avoid)(struct sock *sk, u32 ack, u32 in_flight);  // 计算新的拥塞窗口  
+	         /* call before changing ca_state (optional) */  
+	         void (*set_state)(struct sock *sk, u8 new_state); // 设置拥塞状态  
+	         /* call when cwnd event occurs (optional) */  
+	         void (*cwnd_event)(struct sock *sk, enum tcp_ca_event ev);  // 拥塞事件发生时候处理  
+	         /* new value of cwnd after loss (optional) */  
+	         u32  (*undo_cwnd)(struct sock *sk);  // 丢包之后，拥塞窗口新的值  
+	         /* hook for packet ack accounting (optional) */  
+	         void (*pkts_acked)(struct sock *sk, u32 num_acked, s32 rtt_us); // 包的ack计数器  
+	         /* get info for inet_diag (optional) */  
+	         void (*get_info)(struct sock *sk, u32 ext, struct sk_buff *skb); //   
+	   
+	         char            name[TCP_CA_NAME_MAX];  
+	         struct module   *owner;  
+	};  
+	#+END_SRC
+
+*** 调用时机
+**** init
+	 拥塞算法的初始化函数，进行特定的初始化过程。当传输控制块的某种拥塞控制算法被选中时调用。
+	 调用时机：
+     tcp_cong.c:96:	if (icsk->icsk_ca_ops->init)
+     tcp_cong.c:97:		icsk->icsk_ca_ops->init(sk);
+     tcp_cong.c:269:		if (sk->sk_state != TCP_CLOSE && icsk->icsk_ca_ops->init)
+     tcp_cong.c:270:			icsk->icsk_ca_ops->init(sk);
+	 - tcp_init_congestion_control()
+	#+BEGIN_SRC c -n		 
+     void tcp_init_congestion_control(struct sock *sk)
+     {
+      	struct inet_connection_sock *icsk = inet_csk(sk);
+      	struct tcp_congestion_ops *ca;
+      
+      	/* if no choice made yet assign the current value set as default */
+      	if (icsk->icsk_ca_ops == &tcp_init_congestion_ops) {
+      		rcu_read_lock();
+      		list_for_each_entry_rcu(ca, &tcp_cong_list, list) {
+      			if (try_module_get(ca->owner)) {
+      				icsk->icsk_ca_ops = ca;
+      				break;
+      			}
+      
+      			/* fallback to next available */
+      		}
+      		rcu_read_unlock();
+      	}
+      
+      	if (icsk->icsk_ca_ops->init)
+      		icsk->icsk_ca_ops->init(sk);
+     }
+	 #+END_SRC
+
+	 - tcp_set_congestion_control()
+	#+html: <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+	#+BEGIN_SRC c -n
+     int tcp_set_congestion_control(struct sock *sk, const char *name)
+     {
+      	struct inet_connection_sock *icsk = inet_csk(sk);
+      	struct tcp_congestion_ops *ca;
+      	int err = 0;
+      
+      	rcu_read_lock();
+      	ca = tcp_ca_find(name);
+      
+      	/* no change asking for existing value */
+      	if (ca == icsk->icsk_ca_ops)
+      		goto out;
+      
+     #ifdef CONFIG_MODULES
+      	/* not found attempt to autoload module */
+      	if (!ca && capable(CAP_NET_ADMIN)) {
+      		rcu_read_unlock();
+      		request_module("tcp_%s", name);
+      		rcu_read_lock();
+      		ca = tcp_ca_find(name);
+      	}
+     #endif
+      	if (!ca)
+      		err = -ENOENT;
+      
+      	else if (!((ca->flags & TCP_CONG_NON_RESTRICTED) || capable(CAP_NET_ADMIN)))
+      		err = -EPERM;
+      
+      	else if (!try_module_get(ca->owner))
+      		err = -EBUSY;
+      
+      	else {
+      		tcp_cleanup_congestion_control(sk);
+      		icsk->icsk_ca_ops = ca;
+      
+      		if (sk->sk_state != TCP_CLOSE && icsk->icsk_ca_ops->init)
+      			icsk->icsk_ca_ops->init(sk);
+      	}
+      out:
+      	rcu_read_unlock();
+      	return err;
+     }
+	 #+END_SRC
+	 
+**** release
+	 当关闭接口，或传输控制块选择了另一个拥塞控制算法时，原先拥塞控制算法的此接口在正式设置前被调用，进行清理工作。当关闭套接口时，
+	 此接口也被调用。如果不需要进行清理工作也可以不实现此接口。
+	 调用时机：
+	 - tcp_cleanup_congestion_control()
+	#+BEGIN_SRC c -n	 
+     /* Manage refcounts on socket close. */
+     void tcp_cleanup_congestion_control(struct sock *sk)
+     {
+      	struct inet_connection_sock *icsk = inet_csk(sk);
+      
+      	if (icsk->icsk_ca_ops->release)
+      		icsk->icsk_ca_ops->release(sk);
+      	module_put(icsk->icsk_ca_ops->owner);
+     }
+ 	 #+END_SRC
+	 
+**** ssthresh
+	 计算并返回慢启动门限。
+	 调用时机：
+	 - tcp_enter_cwr()
+     cp_input.c:823:			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+	 #+BEGIN_SRC c -n	 
+     /* Set slow start threshold and cwnd not falling to slow start */
+     void tcp_enter_cwr(struct sock *sk, const int set_ssthresh)
+     {
+      	struct tcp_sock *tp = tcp_sk(sk);
+      	const struct inet_connection_sock *icsk = inet_csk(sk);
+      
+      	tp->prior_ssthresh = 0;
+      	tp->bytes_acked = 0;
+      	if (icsk->icsk_ca_state < TCP_CA_CWR) {
+      		tp->undo_marker = 0;
+      		if (set_ssthresh)
+      			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+      		tp->snd_cwnd = min(tp->snd_cwnd,
+      				   tcp_packets_in_flight(tp) + 1U);
+      		tp->snd_cwnd_cnt = 0;
+      		tp->high_seq = tp->snd_nxt;
+      		tp->snd_cwnd_stamp = tcp_time_stamp;
+      		TCP_ECN_queue_cwr(tp);
+      
+      		tcp_set_ca_state(sk, TCP_CA_CWR);
+      	}
+     }
+	 #+END_SRC
+
+	 - tcp_enter_frto()
+     cp_input.c:2059:			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+     cp_input.c:2062:			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+	 #+BEGIN_SRC c -n	 	 
+     void tcp_enter_frto(struct sock *sk)
+     {
+      	const struct inet_connection_sock *icsk = inet_csk(sk);
+      	struct tcp_sock *tp = tcp_sk(sk);
+      	struct sk_buff *skb;
+      
+      	if ((!tp->frto_counter && icsk->icsk_ca_state <= TCP_CA_Disorder) ||
+      	    tp->snd_una == tp->high_seq ||
+      	    ((icsk->icsk_ca_state == TCP_CA_Loss || tp->frto_counter) &&
+      	     !icsk->icsk_retransmits)) {
+      		tp->prior_ssthresh = tcp_current_ssthresh(sk);
+      		/* Our state is too optimistic in ssthresh() call because cwnd
+      		 * is not reduced until tcp_enter_frto_loss() when previous F-RTO
+      		 * recovery has not yet completed. Pattern would be this: RTO,
+      		 * Cumulative ACK, RTO (2xRTO for the same segment does not end
+      		 * up here twice).
+      		 * RFC4138 should be more specific on what to do, even though
+      		 * RTO is quite unlikely to occur after the first Cumulative ACK
+      		 * due to back-off and complexity of triggering events ...
+      		 */
+      		if (tp->frto_counter) {
+      			u32 stored_cwnd;
+      			stored_cwnd = tp->snd_cwnd;
+      			tp->snd_cwnd = 2;
+      			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+      			tp->snd_cwnd = stored_cwnd;
+      		} else {
+      			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+      		}
+      		/* ... in theory, cong.control module could do "any tricks" in
+      		 * ssthresh(), which means that ca_state, lost bits and lost_out
+      		 * counter would have to be faked before the call occurs. We
+      		 * consider that too expensive, unlikely and hacky, so modules
+      		 * using these in ssthresh() must deal these incompatibility
+      		 * issues if they receives CA_EVENT_FRTO and frto_counter != 0
+      		 */
+      		tcp_ca_event(sk, CA_EVENT_FRTO);
+      	}
+		.........
+     }
+	 #+END_SRC
+	 
+	 - tcp_enter_loss()
+     cp_input.c:2202:		tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+	 #+BEGIN_SRC c -n	
+     void tcp_enter_loss(struct sock *sk, int how)
+     {
+      	const struct inet_connection_sock *icsk = inet_csk(sk);
+      	struct tcp_sock *tp = tcp_sk(sk);
+      	struct sk_buff *skb;
+      
+      	/* Reduce ssthresh if it has not yet been made inside this window. */
+      	if (icsk->icsk_ca_state <= TCP_CA_Disorder || tp->snd_una == tp->high_seq ||
+      	    (icsk->icsk_ca_state == TCP_CA_Loss && !icsk->icsk_retransmits)) {
+      		tp->prior_ssthresh = tcp_current_ssthresh(sk);
+      		tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+      		tcp_ca_event(sk, CA_EVENT_LOSS);
+      	}
+      	.........
+     }
+	 #+END_SRC
+
+	 - tcp_fastretrans_aletr()
+     cp_input.c:3051:			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+	 #+BEGIN_SRC c -n		 
+     static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
+     {
+     .........
+      		if (icsk->icsk_ca_state < TCP_CA_CWR) {
+      			if (!(flag & FLAG_ECE))
+      				tp->prior_ssthresh = tcp_current_ssthresh(sk);
+      			tp->snd_ssthresh = icsk->icsk_ca_ops->ssthresh(sk);
+      			TCP_ECN_queue_cwr(tp);
+      		}
+      
+     .........
+     }
+	 #+END_SRC
+	 
+**** min_cwnd
+	 计算并返回拥塞窗口最小值。
+	 调用时机: tcp_fastretrans_alert() --> tcp_cwnd_down() --> tcp_cwnd_min().
+	 - tcp_cwnd_min()
+	 #+BEGIN_SRC c -n		 
+     static inline u32 tcp_cwnd_min(const struct sock *sk)
+     {
+      	const struct tcp_congestion_ops *ca_ops = inet_csk(sk)->icsk_ca_ops;
+      
+      	return ca_ops->min_cwnd ? ca_ops->min_cwnd(sk) : tcp_sk(sk)->snd_ssthresh;
+     }
+	 #+END_SRC
+	 
+**** cong_avoid
+	 在拥塞避免模式下重新计算拥塞窗口。
+	 - 调用时机: 
+     tcp_input.c:3658:			tcp_cong_avoid(sk, ack, prior_in_flight);
+     tcp_input.c:3663:			tcp_cong_avoid(sk, ack, prior_in_flight);
+	 #+BEGIN_SRC c -n		 	 
+     static void tcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
+     {
+      	const struct inet_connection_sock *icsk = inet_csk(sk);
+      	icsk->icsk_ca_ops->cong_avoid(sk, ack, in_flight);
+      	tcp_sk(sk)->snd_cwnd_stamp = tcp_time_stamp;
+     }
+	 #+END_SRC
+	 
+**** set_state
+	 在拥塞状态改变时，此接口会被调用。
+	 - 调用时机:
+     tcp.c:2062:	tcp_set_ca_state(sk, TCP_CA_Open);
+     tcp_input.c:831:		tcp_set_ca_state(sk, TCP_CA_CWR);
+     tcp_input.c:2099:	tcp_set_ca_state(sk, TCP_CA_Disorder);
+     tcp_input.c:2164:	tcp_set_ca_state(sk, TCP_CA_Loss);
+     tcp_input.c:2243:	tcp_set_ca_state(sk, TCP_CA_Loss);
+     tcp_input.c:2702:	tcp_set_ca_state(sk, TCP_CA_Open);
+     tcp_input.c:2771:			tcp_set_ca_state(sk, TCP_CA_Open);
+     tcp_input.c:2794:		tcp_set_ca_state(sk, state);
+     tcp_input.c:2891:		tcp_set_ca_state(sk, TCP_CA_Loss);
+     tcp_input.c:2960:				tcp_set_ca_state(sk, TCP_CA_Open);
+     tcp_input.c:2971:				tcp_set_ca_state(sk, TCP_CA_Open);
+     tcp_input.c:3057:		tcp_set_ca_state(sk, TCP_CA_Recovery);
+     tcp_minisocks.c:429:		tcp_set_ca_state(newsk, TCP_CA_Open);
+	 
+	 #+BEGIN_SRC c -n		 	 	 	 
+     static inline void tcp_set_ca_state(struct sock *sk, const u8 ca_state)
+     {
+      	struct inet_connection_sock *icsk = inet_csk(sk);
+      
+      	if (icsk->icsk_ca_ops->set_state)
+      		icsk->icsk_ca_ops->set_state(sk, ca_state);
+      	icsk->icsk_ca_state = ca_state;
+     }
+	 #+END_SRC
+	 
+**** cwnd_event
+	 用于通知拥塞控制算法内部的事件接口，当有拥塞控制的事件发生时被调用。
+	 - 调用时机:	 
+     tcp_input.c:2071:		tcp_ca_event(sk, CA_EVENT_FRTO);
+     tcp_input.c:2203:		tcp_ca_event(sk, CA_EVENT_LOSS);
+     tcp_input.c:2782:	tcp_ca_event(sk, CA_EVENT_COMPLETE_CWR);
+     tcp_input.c:3615:		tcp_ca_event(sk, CA_EVENT_FAST_ACK);
+     tcp_input.c:3632:		tcp_ca_event(sk, CA_EVENT_SLOW_ACK);
+     tcp_output.c:134:	tcp_ca_event(sk, CA_EVENT_CWND_RESTART);
+     tcp_output.c:655:		tcp_ca_event(sk, CA_EVENT_TX_START);
+	 #+BEGIN_SRC c -n		 	 	 
+     static inline void tcp_ca_event(struct sock *sk, const enum tcp_ca_event event)
+     {
+      	const struct inet_connection_sock *icsk = inet_csk(sk);
+      
+      	if (icsk->icsk_ca_ops->cwnd_event)
+      		icsk->icsk_ca_ops->cwnd_event(sk, event);
+     }
+	 #+END_SRC
+
+**** undo_cwnd	 
+	 在撤销“缩小拥塞窗口”时，　如果实现此接口，则会调用此接口撤销拥塞窗口。
+	 - 调用时机:
+    tcp_input.c:2653:		if (icsk->icsk_ca_ops->undo_cwnd)
+    tcp_input.c:2654:			tp->snd_cwnd = icsk->icsk_ca_ops->undo_cwnd(sk);
+	 #+BEGIN_SRC c -n		 	 	 	   
+     static void tcp_undo_cwr(struct sock *sk, const int undo)
+     {
+      	struct tcp_sock *tp = tcp_sk(sk);
+      
+      	if (tp->prior_ssthresh) {
+      		const struct inet_connection_sock *icsk = inet_csk(sk);
+      
+      		if (icsk->icsk_ca_ops->undo_cwnd)
+      			tp->snd_cwnd = icsk->icsk_ca_ops->undo_cwnd(sk);
+      		else
+      			tp->snd_cwnd = max(tp->snd_cwnd, tp->snd_ssthresh << 1);
+      
+      		if (undo && tp->prior_ssthresh > tp->snd_ssthresh) {
+      			tp->snd_ssthresh = tp->prior_ssthresh;
+      			TCP_ECN_withdraw_cwr(tp);
+      		}
+      	} else {
+      		tp->snd_cwnd = max(tp->snd_cwnd, tp->snd_ssthresh);
+      	}
+      	tcp_moderate_cwnd(tp);
+      	tp->snd_cwnd_stamp = tcp_time_stamp;
+     }
+	 #+END_SRC
+	 
+**** pkts_acked
+	 当发送方接收到ACK后，　有段被确认时，此接口被调用。参数num_acked为此次ACK确认的段数。
+	 - 调用时机:
+     tcp_input.c:3296:		if (ca_ops->pkts_acked) {
+     tcp_input.c:3311:			ca_ops->pkts_acked(sk, pkts_acked, rtt_us);
+	 - tcp_clean_rtx_queue()	   
+	 #+BEGIN_SRC c -n		 	 	 	   	 
+     static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
+      			       u32 prior_snd_una)
+     {
+     .........
+      		if (ca_ops->pkts_acked) {
+      			s32 rtt_us = -1;
+      
+      			/* Is the ACK triggering packet unambiguous? */
+      			if (!(flag & FLAG_RETRANS_DATA_ACKED)) {
+      				/* High resolution needed and available? */
+      				if (ca_ops->flags & TCP_CONG_RTT_STAMP &&
+      				    !ktime_equal(last_ackt,
+      						 net_invalid_timestamp()))
+      					rtt_us = ktime_us_delta(ktime_get_real(),
+      								last_ackt);
+      				else if (ca_seq_rtt >= 0)
+      					rtt_us = jiffies_to_usecs(ca_seq_rtt);
+      			}
+      
+      			ca_ops->pkts_acked(sk, pkts_acked, rtt_us);
+      		}
+     .........		
+     }		
+	 #+END_SRC
+	 
+**** get_info
+	 提供给inet_diag的获取信息接口。
+	 调用时机:
+       inet_diag.c:168:	    icsk->icsk_ca_ops && icsk->icsk_ca_ops->get_info)
+       inet_diag.c:169:		icsk->icsk_ca_ops->get_info(sk, ext, skb);	 
+	 - inet_csk_diag_fill()
+	 #+BEGIN_SRC c -n		 	 	 	   	 	 
+     static int inet_csk_diag_fill(struct sock *sk,
+      			      struct sk_buff *skb,
+      			      int ext, u32 pid, u32 seq, u16 nlmsg_flags,
+      			      const struct nlmsghdr *unlh)
+     {
+     .........	 
+      	if (sk->sk_state < TCP_TIME_WAIT &&
+      	    icsk->icsk_ca_ops && icsk->icsk_ca_ops->get_info)
+      		icsk->icsk_ca_ops->get_info(sk, ext, skb);
+     .........
+     }
+	 #+END_SRC   
    
 ** 慢启动
 *** 连接建立时

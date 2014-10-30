@@ -7,7 +7,7 @@
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
 <meta name="title" content="TCP内核源码分析笔记"/>
 <meta name="generator" content="Org-mode"/>
-<meta name="generated" content="2014-10-21T09:58+0800"/>
+<meta name="generated" content="2014-10-30T11:34+0800"/>
 <meta name="author" content="mosp"/>
 <meta name="description" content=""/>
 <meta name="keywords" content="linux, kernel, tcp, 读书笔记， 网络管理"/>
@@ -179,61 +179,78 @@ for the JavaScript code in this tag.
 <li><a href="#sec-7-1">7.1 拥塞状态</a></li>
 <li><a href="#sec-7-2">7.2 cwnd初始值</a></li>
 <li><a href="#sec-7-3">7.3 SACK/RENO/FACK是否启用</a></li>
-<li><a href="#sec-7-4">7.4 慢启动</a>
+<li><a href="#sec-7-4">7.4 拥塞控制结构体</a>
 <ul>
-<li><a href="#sec-7-4-1">7.4.1 连接建立时</a></li>
-<li><a href="#sec-7-4-2">7.4.2 tcp_ack()</a></li>
-<li><a href="#sec-7-4-3">7.4.3 拥塞控制入口</a></li>
-<li><a href="#sec-7-4-4">7.4.4 snd_ssthresh设置</a></li>
-<li><a href="#sec-7-4-5">7.4.5 snd_cwnd_clamp设置</a>
+<li><a href="#sec-7-4-1">7.4.1 调用时机</a>
 <ul>
-<li><a href="#sec-7-4-5-1">7.4.5.1 初始值后第一次修改</a></li>
-<li><a href="#sec-7-4-5-2">7.4.5.2 连接复位前更新</a></li>
+<li><a href="#sec-7-4-1-1">7.4.1.1 init</a></li>
+<li><a href="#sec-7-4-1-2">7.4.1.2 release</a></li>
+<li><a href="#sec-7-4-1-3">7.4.1.3 ssthresh</a></li>
+<li><a href="#sec-7-4-1-4">7.4.1.4 min_cwnd</a></li>
+<li><a href="#sec-7-4-1-5">7.4.1.5 cong_avoid</a></li>
+<li><a href="#sec-7-4-1-6">7.4.1.6 set_state</a></li>
+<li><a href="#sec-7-4-1-7">7.4.1.7 cwnd_event</a></li>
+<li><a href="#sec-7-4-1-8">7.4.1.8 undo_cwnd</a></li>
+<li><a href="#sec-7-4-1-9">7.4.1.9 pkts_acked</a></li>
+<li><a href="#sec-7-4-1-10">7.4.1.10 get_info</a></li>
+</ul></li>
 </ul>
 </li>
-<li><a href="#sec-7-4-6">7.4.6 拥塞控制实现</a></li>
-<li><a href="#sec-7-4-7">7.4.7 慢启动算法</a></li>
-<li><a href="#sec-7-4-8">7.4.8 备注</a></li>
+<li><a href="#sec-7-5">7.5 慢启动</a>
+<ul>
+<li><a href="#sec-7-5-1">7.5.1 连接建立时</a></li>
+<li><a href="#sec-7-5-2">7.5.2 tcp_ack()</a></li>
+<li><a href="#sec-7-5-3">7.5.3 拥塞控制入口</a></li>
+<li><a href="#sec-7-5-4">7.5.4 snd_ssthresh设置</a></li>
+<li><a href="#sec-7-5-5">7.5.5 snd_cwnd_clamp设置</a>
+<ul>
+<li><a href="#sec-7-5-5-1">7.5.5.1 初始值后第一次修改</a></li>
+<li><a href="#sec-7-5-5-2">7.5.5.2 连接复位前更新</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-5">7.5 拥塞避免</a>
-<ul>
-<li><a href="#sec-7-5-1">7.5.1 拥塞避免算法</a></li>
+<li><a href="#sec-7-5-6">7.5.6 拥塞控制实现</a></li>
+<li><a href="#sec-7-5-7">7.5.7 慢启动算法</a></li>
+<li><a href="#sec-7-5-8">7.5.8 备注</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-6">7.6 快速重传</a>
+<li><a href="#sec-7-6">7.6 拥塞避免</a>
 <ul>
-<li><a href="#sec-7-6-1">7.6.1 快速重传做的事情有：</a></li>
-<li><a href="#sec-7-6-2">7.6.2 第一个重复的ACK</a></li>
-<li><a href="#sec-7-6-3">7.6.3 第2个重复的ACK</a></li>
-<li><a href="#sec-7-6-4">7.6.4 第3个重复的ACK</a></li>
+<li><a href="#sec-7-6-1">7.6.1 拥塞避免算法</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-7">7.7 快速恢复</a>
+<li><a href="#sec-7-7">7.7 快速重传</a>
 <ul>
-<li><a href="#sec-7-7-1">7.7.1 具体来说快速恢复的主要步骤是：</a></li>
+<li><a href="#sec-7-7-1">7.7.1 快速重传做的事情有：</a></li>
+<li><a href="#sec-7-7-2">7.7.2 第一个重复的ACK</a></li>
+<li><a href="#sec-7-7-3">7.7.3 第2个重复的ACK</a></li>
+<li><a href="#sec-7-7-4">7.7.4 第3个重复的ACK</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-8">7.8 拥塞状态机</a>
+<li><a href="#sec-7-8">7.8 快速恢复</a>
 <ul>
-<li><a href="#sec-7-8-1">7.8.1 进入条件</a></li>
-<li><a href="#sec-7-8-2">7.8.2 状态机实现</a></li>
-<li><a href="#sec-7-8-3">7.8.3 退出条件</a></li>
+<li><a href="#sec-7-8-1">7.8.1 具体来说快速恢复的主要步骤是：</a></li>
 </ul>
 </li>
-<li><a href="#sec-7-9">7.9 拥塞事件</a>
+<li><a href="#sec-7-9">7.9 拥塞状态机</a>
 <ul>
-<li><a href="#sec-7-9-1">7.9.1 TCP的拥塞事件集</a></li>
-<li><a href="#sec-7-9-2">7.9.2 钩子函数定义</a></li>
-<li><a href="#sec-7-9-3">7.9.3 封装调用</a></li>
-<li><a href="#sec-7-9-4">7.9.4 CA_EVENT_TX_START</a></li>
-<li><a href="#sec-7-9-5">7.9.5 CA_EVENT_CWND_RESTART</a></li>
-<li><a href="#sec-7-9-6">7.9.6 CA_EVENT_COMPLETE_CWR</a></li>
-<li><a href="#sec-7-9-7">7.9.7 CA_EVENT_FRTO</a></li>
-<li><a href="#sec-7-9-8">7.9.8 CA_EVENT_LOSS</a></li>
-<li><a href="#sec-7-9-9">7.9.9 CA_EVENT_FAST_ACK</a></li>
-<li><a href="#sec-7-9-10">7.9.10 CA_EVENT_SLOW_ACK</a></li>
-<li><a href="#sec-7-9-11">7.9.11 阈值的设置</a></li>
+<li><a href="#sec-7-9-1">7.9.1 进入条件</a></li>
+<li><a href="#sec-7-9-2">7.9.2 状态机实现</a></li>
+<li><a href="#sec-7-9-3">7.9.3 退出条件</a></li>
+</ul>
+</li>
+<li><a href="#sec-7-10">7.10 拥塞事件</a>
+<ul>
+<li><a href="#sec-7-10-1">7.10.1 TCP的拥塞事件集</a></li>
+<li><a href="#sec-7-10-2">7.10.2 钩子函数定义</a></li>
+<li><a href="#sec-7-10-3">7.10.3 封装调用</a></li>
+<li><a href="#sec-7-10-4">7.10.4 CA_EVENT_TX_START</a></li>
+<li><a href="#sec-7-10-5">7.10.5 CA_EVENT_CWND_RESTART</a></li>
+<li><a href="#sec-7-10-6">7.10.6 CA_EVENT_COMPLETE_CWR</a></li>
+<li><a href="#sec-7-10-7">7.10.7 CA_EVENT_FRTO</a></li>
+<li><a href="#sec-7-10-8">7.10.8 CA_EVENT_LOSS</a></li>
+<li><a href="#sec-7-10-9">7.10.9 CA_EVENT_FAST_ACK</a></li>
+<li><a href="#sec-7-10-10">7.10.10 CA_EVENT_SLOW_ACK</a></li>
+<li><a href="#sec-7-10-11">7.10.11 阈值的设置</a></li>
 </ul></li>
 </ul>
 </li>
@@ -1965,23 +1982,607 @@ for the JavaScript code in this tag.
   （2）如果没启用FACK，那么就假设只丢了一个数据包，所以left_out = sacked_out + 1<br/>
           这是一种较为保守的做法，当出现大量丢包时，这种做法会出现问题。    <br/>
 </p>
-<p>   <br/>
-</p>
-<p>   <br/>
+<p><br/>
 </p></div>
 
 </div>
 
 <div id="outline-container-7-4" class="outline-3">
-<h3 id="sec-7-4"><span class="section-number-3">7.4</span> 慢启动</h3>
+<h3 id="sec-7-4"><span class="section-number-3">7.4</span> 拥塞控制结构体</h3>
 <div class="outline-text-3" id="text-7-4">
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_congestion_ops</span> <span style="color: #cd2626;">{</span>  
+<span class="linenr"> 2:  </span>        <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">list_head</span>        <span style="color: #a0522d;">list</span><span style="color: #8b6508;">;</span>  
+<span class="linenr"> 3:  </span>        <span style="color: #228b22;">unsigned</span> <span style="color: #228b22;">long</span> <span style="color: #a0522d;">flags</span><span style="color: #8b6508;">;</span>  
+<span class="linenr"> 4:  </span>
+<span class="linenr"> 5:  </span>        <span style="color: #b22222;">/* </span><span style="color: #b22222;">initialize private data (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr"> 6:  </span>        <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">init</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>                    <span style="color: #b22222;">// </span><span style="color: #b22222;">&#21021;&#22987;&#21270;  </span>
+<span class="linenr"> 7:  </span>        <span style="color: #b22222;">/* </span><span style="color: #b22222;">cleanup private data  (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr"> 8:  </span>        <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">release</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>                  <span style="color: #b22222;">// </span><span style="color: #b22222;">&#28165;&#38500;&#25968;&#25454;  </span>
+<span class="linenr"> 9:  </span>
+<span class="linenr">10:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">return slow start threshold (required) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">11:  </span>         <span style="color: #008000; font-weight: bold;">u32</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span>ssthresh<span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>                <span style="color: #b22222;">// </span><span style="color: #b22222;">&#36820;&#22238;&#24930;&#24320;&#22987;&#38376;&#38480;  </span>
+<span class="linenr">12:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">lower bound for congestion window (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">13:  </span>         <span style="color: #008000; font-weight: bold;">u32</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span>min_cwnd<span style="color: #cd2626;">)(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>          <span style="color: #b22222;">// </span><span style="color: #b22222;">&#25317;&#22622;&#31383;&#21475;&#26368;&#23567;&#20540;  </span>
+<span class="linenr">14:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">do new cwnd calculation (required) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">15:  </span>         <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">cong_avoid</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">ack</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">in_flight</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  <span style="color: #b22222;">// </span><span style="color: #b22222;">&#35745;&#31639;&#26032;&#30340;&#25317;&#22622;&#31383;&#21475;  </span>
+<span class="linenr">16:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">call before changing ca_state (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">17:  </span>         <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">set_state</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u8</span> <span style="color: #a0522d;">new_state</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span> <span style="color: #b22222;">// </span><span style="color: #b22222;">&#35774;&#32622;&#25317;&#22622;&#29366;&#24577;  </span>
+<span class="linenr">18:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">call when cwnd event occurs (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">19:  </span>         <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">cwnd_event</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">enum</span> <span style="color: #228b22;">tcp_ca_event</span> <span style="color: #a0522d;">ev</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  <span style="color: #b22222;">// </span><span style="color: #b22222;">&#25317;&#22622;&#20107;&#20214;&#21457;&#29983;&#26102;&#20505;&#22788;&#29702;  </span>
+<span class="linenr">20:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">new value of cwnd after loss (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">21:  </span>         <span style="color: #228b22;">u32</span>  <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">undo_cwnd</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>  <span style="color: #b22222;">// </span><span style="color: #b22222;">&#20002;&#21253;&#20043;&#21518;&#65292;&#25317;&#22622;&#31383;&#21475;&#26032;&#30340;&#20540;  </span>
+<span class="linenr">22:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">hook for packet ack accounting (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">23:  </span>         <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">pkts_acked</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">num_acked</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">s32</span> <span style="color: #a0522d;">rtt_us</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span> <span style="color: #b22222;">// </span><span style="color: #b22222;">&#21253;&#30340;ack&#35745;&#25968;&#22120;  </span>
+<span class="linenr">24:  </span>         <span style="color: #b22222;">/* </span><span style="color: #b22222;">get info for inet_diag (optional) </span><span style="color: #b22222;">*/</span>  
+<span class="linenr">25:  </span>         <span style="color: #228b22;">void</span> <span style="color: #cd2626;">(</span><span style="color: #8b6508;">*</span><span style="color: #0000ff; font-size: 120%;">get_info</span><span style="color: #cd2626;">)(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">ext</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span> <span style="color: #b22222;">//   </span>
+<span class="linenr">26:  </span>
+<span class="linenr">27:  </span>         <span style="color: #228b22;">char</span>            <span style="color: #a0522d;">name</span><span style="color: #cd2626;">[</span>TCP_CA_NAME_MAX<span style="color: #cd2626;">]</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">28:  </span>         <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">module</span>   <span style="color: #8b6508;">*</span><span style="color: #a0522d;">owner</span><span style="color: #8b6508;">;</span>  
+<span class="linenr">29:  </span><span style="color: #cd2626;">}</span><span style="color: #8b6508;">;</span>  
+</pre>
+
+
+</p>
+</div>
+
+<div id="outline-container-7-4-1" class="outline-4">
+<h4 id="sec-7-4-1"><span class="section-number-4">7.4.1</span> 调用时机</h4>
+<div class="outline-text-4" id="text-7-4-1">
 
 
 </div>
 
-<div id="outline-container-7-4-1" class="outline-4">
-<h4 id="sec-7-4-1"><span class="section-number-4">7.4.1</span> 连接建立时</h4>
-<div class="outline-text-4" id="text-7-4-1">
+<div id="outline-container-7-4-1-1" class="outline-5">
+<h5 id="sec-7-4-1-1"><span class="section-number-5">7.4.1.1</span> init</h5>
+<div class="outline-text-5" id="text-7-4-1-1">
+
+<p>     拥塞算法的初始化函数，进行特定的初始化过程。当传输控制块的某种拥塞控制算法被选中时调用。<br/>
+     调用时机：<br/>
+     tcp_cong.c:96: if (icsk-&gt;icsk_ca_ops-&gt;init)<br/>
+     tcp_cong.c:97:     icsk-&gt;icsk_ca_ops-&gt;init(sk);<br/>
+     tcp_cong.c:269:        if (sk-&gt;sk_state != TCP_CLOSE &amp;&amp; icsk-&gt;icsk_ca_ops-&gt;init)<br/>
+     tcp_cong.c:270:            icsk-&gt;icsk_ca_ops-&gt;init(sk);<br/>
+</p><ul>
+<li>tcp_init_congestion_control()<br/>
+</li>
+</ul>
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_init_congestion_control</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_congestion_ops</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">ca</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 5:  </span>
+<span class="linenr"> 6:  </span>   <span style="color: #b22222;">/* </span><span style="color: #b22222;">if no choice made yet assign the current value set as default </span><span style="color: #b22222;">*/</span>
+<span class="linenr"> 7:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span> <span style="color: #8b6508;">==</span> <span style="color: #8b6508;">&amp;</span>tcp_init_congestion_ops<span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr"> 8:  </span>       <span style="color: #008000; font-weight: bold;">rcu_read_lock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 9:  </span>       <span style="color: #0000ff; font-size: 120%;">list_for_each_entry_rcu</span><span style="color: #cd2626;">(</span>ca<span style="color: #8b6508;">,</span> <span style="color: #8b6508;">&amp;</span>tcp_cong_list<span style="color: #8b6508;">,</span> list<span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">10:  </span>           <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span><span style="color: #008000; font-weight: bold;">try_module_get</span><span style="color: #cd2626;">(</span>ca<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">owner</span><span style="color: #cd2626;">))</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">11:  </span>               icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span> <span style="color: #8b6508;">=</span> ca<span style="color: #8b6508;">;</span>
+<span class="linenr">12:  </span>               <span style="color: #a020f0;">break</span><span style="color: #8b6508;">;</span>
+<span class="linenr">13:  </span>           <span style="color: #cd2626;">}</span>
+<span class="linenr">14:  </span>
+<span class="linenr">15:  </span>           <span style="color: #b22222;">/* </span><span style="color: #b22222;">fallback to next available </span><span style="color: #b22222;">*/</span>
+<span class="linenr">16:  </span>       <span style="color: #cd2626;">}</span>
+<span class="linenr">17:  </span>       <span style="color: #008000; font-weight: bold;">rcu_read_unlock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr">18:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">19:  </span>
+<span class="linenr">20:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">init</span><span style="color: #cd2626;">)</span>
+<span class="linenr">21:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">init</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">22:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+</p><ul>
+<li>tcp_set_congestion_control()<br/>
+</li>
+</ul>
+
+
+    <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
+
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_set_congestion_control</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">const</span> <span style="color: #228b22;">char</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">name</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_congestion_ops</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">ca</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 5:  </span>   <span style="color: #228b22;">int</span> <span style="color: #a0522d;">err</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">0</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 6:  </span>
+<span class="linenr"> 7:  </span>   <span style="color: #008000; font-weight: bold;">rcu_read_lock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 8:  </span>   ca <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_ca_find</span><span style="color: #cd2626;">(</span>name<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 9:  </span>
+<span class="linenr">10:  </span>   <span style="color: #b22222;">/* </span><span style="color: #b22222;">no change asking for existing value </span><span style="color: #b22222;">*/</span>
+<span class="linenr">11:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>ca <span style="color: #8b6508;">==</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #cd2626;">)</span>
+<span class="linenr">12:  </span>       <span style="color: #a020f0;">goto</span> <span style="color: #008b8b;">out</span><span style="color: #8b6508;">;</span>
+<span class="linenr">13:  </span>
+<span class="linenr">14:  </span><span style="color: #483d8b;">#ifdef</span> CONFIG_MODULES
+<span class="linenr">15:  </span>   <span style="color: #b22222;">/* </span><span style="color: #b22222;">not found attempt to autoload module </span><span style="color: #b22222;">*/</span>
+<span class="linenr">16:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!ca <span style="color: #8b6508;">&amp;&amp;</span> <span style="color: #008000; font-weight: bold;">capable</span><span style="color: #cd2626;">(</span>CAP_NET_ADMIN<span style="color: #cd2626;">))</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">17:  </span>       <span style="color: #008000; font-weight: bold;">rcu_read_unlock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr">18:  </span>       <span style="color: #008000; font-weight: bold;">request_module</span><span style="color: #cd2626;">(</span><span style="color: #8b2252;">"tcp_%s"</span><span style="color: #8b6508;">,</span> name<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">19:  </span>       <span style="color: #008000; font-weight: bold;">rcu_read_lock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr">20:  </span>       ca <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_ca_find</span><span style="color: #cd2626;">(</span>name<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">21:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">22:  </span><span style="color: #483d8b;">#endif</span>
+<span class="linenr">23:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!ca<span style="color: #cd2626;">)</span>
+<span class="linenr">24:  </span>       err <span style="color: #8b6508;">=</span> <span style="color: #8b6508;">-</span>ENOENT<span style="color: #8b6508;">;</span>
+<span class="linenr">25:  </span>
+<span class="linenr">26:  </span>   <span style="color: #a020f0;">else</span> <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!<span style="color: #cd2626;">((</span>ca<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">flags</span> <span style="color: #8b6508;">&amp;</span> TCP_CONG_NON_RESTRICTED<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">||</span> <span style="color: #008000; font-weight: bold;">capable</span><span style="color: #cd2626;">(</span>CAP_NET_ADMIN<span style="color: #cd2626;">)))</span>
+<span class="linenr">27:  </span>       err <span style="color: #8b6508;">=</span> <span style="color: #8b6508;">-</span>EPERM<span style="color: #8b6508;">;</span>
+<span class="linenr">28:  </span>
+<span class="linenr">29:  </span>   <span style="color: #a020f0;">else</span> <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!<span style="color: #008000; font-weight: bold;">try_module_get</span><span style="color: #cd2626;">(</span>ca<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">owner</span><span style="color: #cd2626;">))</span>
+<span class="linenr">30:  </span>       err <span style="color: #8b6508;">=</span> <span style="color: #8b6508;">-</span>EBUSY<span style="color: #8b6508;">;</span>
+<span class="linenr">31:  </span>
+<span class="linenr">32:  </span>   <span style="color: #a020f0;">else</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">33:  </span>       <span style="color: #008000; font-weight: bold;">tcp_cleanup_congestion_control</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">34:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span> <span style="color: #8b6508;">=</span> ca<span style="color: #8b6508;">;</span>
+<span class="linenr">35:  </span>
+<span class="linenr">36:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>sk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">sk_state</span> <span style="color: #8b6508;">!=</span> TCP_CLOSE <span style="color: #8b6508;">&amp;&amp;</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">init</span><span style="color: #cd2626;">)</span>
+<span class="linenr">37:  </span>           icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">init</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">38:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">39:  </span> <span style="color: #008b8b;">out</span><span style="color: #8b6508;">:</span>
+<span class="linenr">40:  </span>   <span style="color: #008000; font-weight: bold;">rcu_read_unlock</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">;</span>
+<span class="linenr">41:  </span>   <span style="color: #a020f0;">return</span> err<span style="color: #8b6508;">;</span>
+<span class="linenr">42:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-2" class="outline-5">
+<h5 id="sec-7-4-1-2"><span class="section-number-5">7.4.1.2</span> release</h5>
+<div class="outline-text-5" id="text-7-4-1-2">
+
+<p>     当关闭接口，或传输控制块选择了另一个拥塞控制算法时，原先拥塞控制算法的此接口在正式设置前被调用，进行清理工作。当关闭套接口时，<br/>
+     此接口也被调用。如果不需要进行清理工作也可以不实现此接口。<br/>
+     调用时机：<br/>
+</p><ul>
+<li>tcp_cleanup_congestion_control()<br/>
+</li>
+</ul>
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">Manage refcounts on socket close. </span><span style="color: #b22222;">*/</span>
+<span class="linenr">2:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_cleanup_congestion_control</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span>
+<span class="linenr">3:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">5:  </span>
+<span class="linenr">6:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">release</span><span style="color: #cd2626;">)</span>
+<span class="linenr">7:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">release</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">8:  </span>   <span style="color: #008000; font-weight: bold;">module_put</span><span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">owner</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">9:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-3" class="outline-5">
+<h5 id="sec-7-4-1-3"><span class="section-number-5">7.4.1.3</span> ssthresh</h5>
+<div class="outline-text-5" id="text-7-4-1-3">
+
+<p>     计算并返回慢启动门限。<br/>
+     调用时机：<br/>
+</p><ul>
+<li>tcp_enter_cwr()<br/>
+</li>
+</ul>
+
+<p>     cp_input.c:823:            tp-&gt;snd_ssthresh = icsk-&gt;icsk_ca_ops-&gt;ssthresh(sk);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #b22222;">/* </span><span style="color: #b22222;">Set slow start threshold and cwnd not falling to slow start </span><span style="color: #b22222;">*/</span>
+<span class="linenr"> 2:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_enter_cwr</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">const</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">set_ssthresh</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 3:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 5:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 6:  </span>
+<span class="linenr"> 7:  </span>   tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">0</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 8:  </span>   tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">bytes_acked</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">0</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 9:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">&lt;</span> TCP_CA_CWR<span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">10:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">undo_marker</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">0</span><span style="color: #8b6508;">;</span>
+<span class="linenr">11:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>set_ssthresh<span style="color: #cd2626;">)</span>
+<span class="linenr">12:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">13:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">min</span><span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span><span style="color: #8b6508;">,</span>
+<span class="linenr">14:  </span>                  <span style="color: #008000; font-weight: bold;">tcp_packets_in_flight</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">+</span> 1U<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">15:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_cnt</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">0</span><span style="color: #8b6508;">;</span>
+<span class="linenr">16:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">high_seq</span> <span style="color: #8b6508;">=</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_nxt</span><span style="color: #8b6508;">;</span>
+<span class="linenr">17:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_stamp</span> <span style="color: #8b6508;">=</span> tcp_time_stamp<span style="color: #8b6508;">;</span>
+<span class="linenr">18:  </span>       <span style="color: #008000; font-weight: bold;">TCP_ECN_queue_cwr</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">19:  </span>
+<span class="linenr">20:  </span>       <span style="color: #008000; font-weight: bold;">tcp_set_ca_state</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> TCP_CA_CWR<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">21:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">22:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+</p><ul>
+<li>tcp_enter_frto()<br/>
+</li>
+</ul>
+
+<p>     cp_input.c:2059:           tp-&gt;snd_ssthresh = icsk-&gt;icsk_ca_ops-&gt;ssthresh(sk);<br/>
+     cp_input.c:2062:           tp-&gt;snd_ssthresh = icsk-&gt;icsk_ca_ops-&gt;ssthresh(sk);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_enter_frto</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 5:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 6:  </span>
+<span class="linenr"> 7:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">((</span>!tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">frto_counter</span> <span style="color: #8b6508;">&amp;&amp;</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">&lt;=</span> TCP_CA_Disorder<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">||</span>
+<span class="linenr"> 8:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_una</span> <span style="color: #8b6508;">==</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">high_seq</span> <span style="color: #8b6508;">||</span>
+<span class="linenr"> 9:  </span>       <span style="color: #cd2626;">((</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">==</span> TCP_CA_Loss <span style="color: #8b6508;">||</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">frto_counter</span><span style="color: #cd2626;">)</span> <span style="color: #8b6508;">&amp;&amp;</span>
+<span class="linenr">10:  </span>        !icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_retransmits</span><span style="color: #cd2626;">))</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">11:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_current_ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">12:  </span>       <span style="color: #b22222;">/* </span><span style="color: #b22222;">Our state is too optimistic in ssthresh() call because cwnd</span>
+<span class="linenr">13:  </span><span style="color: #b22222;">        * is not reduced until tcp_enter_frto_loss() when previous F-RTO</span>
+<span class="linenr">14:  </span><span style="color: #b22222;">        * recovery has not yet completed. Pattern would be this: RTO,</span>
+<span class="linenr">15:  </span><span style="color: #b22222;">        * Cumulative ACK, RTO (2xRTO for the same segment does not end</span>
+<span class="linenr">16:  </span><span style="color: #b22222;">        * up here twice).</span>
+<span class="linenr">17:  </span><span style="color: #b22222;">        * RFC4138 should be more specific on what to do, even though</span>
+<span class="linenr">18:  </span><span style="color: #b22222;">        * RTO is quite unlikely to occur after the first Cumulative ACK</span>
+<span class="linenr">19:  </span><span style="color: #b22222;">        * due to back-off and complexity of triggering events ...</span>
+<span class="linenr">20:  </span><span style="color: #b22222;">        </span><span style="color: #b22222;">*/</span>
+<span class="linenr">21:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">frto_counter</span><span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">22:  </span>           <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">stored_cwnd</span><span style="color: #8b6508;">;</span>
+<span class="linenr">23:  </span>           stored_cwnd <span style="color: #8b6508;">=</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span><span style="color: #8b6508;">;</span>
+<span class="linenr">24:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #ff0000;">2</span><span style="color: #8b6508;">;</span>
+<span class="linenr">25:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">26:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> stored_cwnd<span style="color: #8b6508;">;</span>
+<span class="linenr">27:  </span>       <span style="color: #cd2626;">}</span> <span style="color: #a020f0;">else</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">28:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">29:  </span>       <span style="color: #cd2626;">}</span>
+<span class="linenr">30:  </span>       <span style="color: #b22222;">/* </span><span style="color: #b22222;">... in theory, cong.control module could do "any tricks" in</span>
+<span class="linenr">31:  </span><span style="color: #b22222;">        * ssthresh(), which means that ca_state, lost bits and lost_out</span>
+<span class="linenr">32:  </span><span style="color: #b22222;">        * counter would have to be faked before the call occurs. We</span>
+<span class="linenr">33:  </span><span style="color: #b22222;">        * consider that too expensive, unlikely and hacky, so modules</span>
+<span class="linenr">34:  </span><span style="color: #b22222;">        * using these in ssthresh() must deal these incompatibility</span>
+<span class="linenr">35:  </span><span style="color: #b22222;">        * issues if they receives CA_EVENT_FRTO and frto_counter != 0</span>
+<span class="linenr">36:  </span><span style="color: #b22222;">        </span><span style="color: #b22222;">*/</span>
+<span class="linenr">37:  </span>       <span style="color: #008000; font-weight: bold;">tcp_ca_event</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> CA_EVENT_FRTO<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">38:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">39:  </span>   <span style="color: #8b6508;">.........</span>
+<span class="linenr">40:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p><ul>
+<li>tcp_enter_loss()<br/>
+</li>
+</ul>
+
+<p>     cp_input.c:2202:       tp-&gt;snd_ssthresh = icsk-&gt;icsk_ca_ops-&gt;ssthresh(sk);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_enter_loss</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">how</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 4:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 5:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 6:  </span>
+<span class="linenr"> 7:  </span>   <span style="color: #b22222;">/* </span><span style="color: #b22222;">Reduce ssthresh if it has not yet been made inside this window. </span><span style="color: #b22222;">*/</span>
+<span class="linenr"> 8:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">&lt;=</span> TCP_CA_Disorder <span style="color: #8b6508;">||</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_una</span> <span style="color: #8b6508;">==</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">high_seq</span> <span style="color: #8b6508;">||</span>
+<span class="linenr"> 9:  </span>       <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">==</span> TCP_CA_Loss <span style="color: #8b6508;">&amp;&amp;</span> !icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_retransmits</span><span style="color: #cd2626;">))</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">10:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_current_ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">11:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">12:  </span>       <span style="color: #008000; font-weight: bold;">tcp_ca_event</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> CA_EVENT_LOSS<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">13:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">14:  </span>   <span style="color: #8b6508;">.........</span>
+<span class="linenr">15:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+</p><ul>
+<li>tcp_fastretrans_aletr()<br/>
+</li>
+</ul>
+
+<p>     cp_input.c:3051:           tp-&gt;snd_ssthresh = icsk-&gt;icsk_ca_ops-&gt;ssthresh(sk);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_fastretrans_alert</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">pkts_acked</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">flag</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span><span style="color: #8b6508;">.........</span>
+<span class="linenr"> 4:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">&lt;</span> TCP_CA_CWR<span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr"> 5:  </span>           <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!<span style="color: #cd2626;">(</span>flag <span style="color: #8b6508;">&amp;</span> FLAG_ECE<span style="color: #cd2626;">))</span>
+<span class="linenr"> 6:  </span>               tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_current_ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 7:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">ssthresh</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 8:  </span>           <span style="color: #008000; font-weight: bold;">TCP_ECN_queue_cwr</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 9:  </span>       <span style="color: #cd2626;">}</span>
+<span class="linenr">10:  </span>
+<span class="linenr">11:  </span><span style="color: #8b6508;">.........</span>
+<span class="linenr">12:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-4" class="outline-5">
+<h5 id="sec-7-4-1-4"><span class="section-number-5">7.4.1.4</span> min_cwnd</h5>
+<div class="outline-text-5" id="text-7-4-1-4">
+
+<p>     计算并返回拥塞窗口最小值。<br/>
+     调用时机: tcp_fastretrans_alert() &ndash;&gt; tcp_cwnd_down() &ndash;&gt; tcp_cwnd_min().<br/>
+</p><ul>
+<li>tcp_cwnd_min()<br/>
+</li>
+</ul>
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">u32</span> <span style="color: #0000ff; font-size: 120%;">tcp_cwnd_min</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #cd2626;">)</span>
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">3:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_congestion_ops</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">ca_ops</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #8b6508;">;</span>
+<span class="linenr">4:  </span>
+<span class="linenr">5:  </span>   <span style="color: #a020f0;">return</span> ca_ops<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">min_cwnd</span> ? ca_ops<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">min_cwnd</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span> <span style="color: #8b6508;">:</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span><span style="color: #8b6508;">;</span>
+<span class="linenr">6:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-5" class="outline-5">
+<h5 id="sec-7-4-1-5"><span class="section-number-5">7.4.1.5</span> cong_avoid</h5>
+<div class="outline-text-5" id="text-7-4-1-5">
+
+<p>     在拥塞避免模式下重新计算拥塞窗口。<br/>
+</p><ul>
+<li>调用时机: <br/>
+</li>
+</ul>
+
+<p>     tcp_input.c:3658:          tcp_cong_avoid(sk, ack, prior_in_flight);<br/>
+     tcp_input.c:3663:          tcp_cong_avoid(sk, ack, prior_in_flight);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_cong_avoid</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">ack</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">in_flight</span><span style="color: #cd2626;">)</span>
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">3:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">4:  </span>   icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">cong_avoid</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> ack<span style="color: #8b6508;">,</span> in_flight<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">5:  </span>   <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_stamp</span> <span style="color: #8b6508;">=</span> tcp_time_stamp<span style="color: #8b6508;">;</span>
+<span class="linenr">6:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-6" class="outline-5">
+<h5 id="sec-7-4-1-6"><span class="section-number-5">7.4.1.6</span> set_state</h5>
+<div class="outline-text-5" id="text-7-4-1-6">
+
+<p>     在拥塞状态改变时，此接口会被调用。<br/>
+</p><ul>
+<li>调用时机:<br/>
+</li>
+</ul>
+
+<p>     tcp.c:2062:    tcp_set_ca_state(sk, TCP_CA_Open);<br/>
+     tcp_input.c:831:       tcp_set_ca_state(sk, TCP_CA_CWR);<br/>
+     tcp_input.c:2099:  tcp_set_ca_state(sk, TCP_CA_Disorder);<br/>
+     tcp_input.c:2164:  tcp_set_ca_state(sk, TCP_CA_Loss);<br/>
+     tcp_input.c:2243:  tcp_set_ca_state(sk, TCP_CA_Loss);<br/>
+     tcp_input.c:2702:  tcp_set_ca_state(sk, TCP_CA_Open);<br/>
+     tcp_input.c:2771:          tcp_set_ca_state(sk, TCP_CA_Open);<br/>
+     tcp_input.c:2794:      tcp_set_ca_state(sk, state);<br/>
+     tcp_input.c:2891:      tcp_set_ca_state(sk, TCP_CA_Loss);<br/>
+     tcp_input.c:2960:              tcp_set_ca_state(sk, TCP_CA_Open);<br/>
+     tcp_input.c:2971:              tcp_set_ca_state(sk, TCP_CA_Open);<br/>
+     tcp_input.c:3057:      tcp_set_ca_state(sk, TCP_CA_Recovery);<br/>
+     tcp_minisocks.c:429:       tcp_set_ca_state(newsk, TCP_CA_Open);<br/>
+</p>
+<p>     <br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_set_ca_state</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">const</span> <span style="color: #228b22;">u8</span> <span style="color: #a0522d;">ca_state</span><span style="color: #cd2626;">)</span>
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">3:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">4:  </span>
+<span class="linenr">5:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">set_state</span><span style="color: #cd2626;">)</span>
+<span class="linenr">6:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">set_state</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> ca_state<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">7:  </span>   icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_state</span> <span style="color: #8b6508;">=</span> ca_state<span style="color: #8b6508;">;</span>
+<span class="linenr">8:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-7" class="outline-5">
+<h5 id="sec-7-4-1-7"><span class="section-number-5">7.4.1.7</span> cwnd_event</h5>
+<div class="outline-text-5" id="text-7-4-1-7">
+
+<p>     用于通知拥塞控制算法内部的事件接口，当有拥塞控制的事件发生时被调用。<br/>
+</p><ul>
+<li>调用时机:     <br/>
+</li>
+</ul>
+
+<p>     tcp_input.c:2071:      tcp_ca_event(sk, CA_EVENT_FRTO);<br/>
+     tcp_input.c:2203:      tcp_ca_event(sk, CA_EVENT_LOSS);<br/>
+     tcp_input.c:2782:  tcp_ca_event(sk, CA_EVENT_COMPLETE_CWR);<br/>
+     tcp_input.c:3615:      tcp_ca_event(sk, CA_EVENT_FAST_ACK);<br/>
+     tcp_input.c:3632:      tcp_ca_event(sk, CA_EVENT_SLOW_ACK);<br/>
+     tcp_output.c:134:  tcp_ca_event(sk, CA_EVENT_CWND_RESTART);<br/>
+     tcp_output.c:655:      tcp_ca_event(sk, CA_EVENT_TX_START);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr">1:  </span><span style="color: #a020f0;">static</span> <span style="color: #a020f0;">inline</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_ca_event</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">enum</span> <span style="color: #228b22;">tcp_ca_event</span> <span style="color: #a0522d;">event</span><span style="color: #cd2626;">)</span>
+<span class="linenr">2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr">3:  </span>   <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">4:  </span>
+<span class="linenr">5:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">cwnd_event</span><span style="color: #cd2626;">)</span>
+<span class="linenr">6:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">cwnd_event</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> event<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">7:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-8" class="outline-5">
+<h5 id="sec-7-4-1-8"><span class="section-number-5">7.4.1.8</span> undo_cwnd</h5>
+<div class="outline-text-5" id="text-7-4-1-8">
+
+<p>     在撤销“缩小拥塞窗口”时，　如果实现此接口，则会调用此接口撤销拥塞窗口。<br/>
+</p><ul>
+<li>调用时机:<br/>
+</li>
+</ul>
+
+<p>    tcp_input.c:2653:       if (icsk-&gt;icsk_ca_ops-&gt;undo_cwnd)<br/>
+    tcp_input.c:2654:           tp-&gt;snd_cwnd = icsk-&gt;icsk_ca_ops-&gt;undo_cwnd(sk);<br/>
+</p>
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">void</span> <span style="color: #0000ff; font-size: 120%;">tcp_undo_cwr</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #a020f0;">const</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">undo</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 2:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 3:  </span>   <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">tcp_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">tp</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">tcp_sk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 4:  </span>
+<span class="linenr"> 5:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span><span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr"> 6:  </span>       <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">inet_connection_sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">icsk</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">inet_csk</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 7:  </span>
+<span class="linenr"> 8:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">undo_cwnd</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 9:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">undo_cwnd</span><span style="color: #cd2626;">(</span>sk<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">10:  </span>       <span style="color: #a020f0;">else</span>
+<span class="linenr">11:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">max</span><span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span><span style="color: #8b6508;">,</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">&lt;&lt;</span> <span style="color: #ff0000;">1</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">12:  </span>
+<span class="linenr">13:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>undo <span style="color: #8b6508;">&amp;&amp;</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span> <span style="color: #8b6508;">&gt;</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span><span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">14:  </span>           tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span> <span style="color: #8b6508;">=</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">prior_ssthresh</span><span style="color: #8b6508;">;</span>
+<span class="linenr">15:  </span>           <span style="color: #008000; font-weight: bold;">TCP_ECN_withdraw_cwr</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">16:  </span>       <span style="color: #cd2626;">}</span>
+<span class="linenr">17:  </span>   <span style="color: #cd2626;">}</span> <span style="color: #a020f0;">else</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">18:  </span>       tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span> <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">max</span><span style="color: #cd2626;">(</span>tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd</span><span style="color: #8b6508;">,</span> tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_ssthresh</span><span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">19:  </span>   <span style="color: #cd2626;">}</span>
+<span class="linenr">20:  </span>   <span style="color: #008000; font-weight: bold;">tcp_moderate_cwnd</span><span style="color: #cd2626;">(</span>tp<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">21:  </span>   tp<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">snd_cwnd_stamp</span> <span style="color: #8b6508;">=</span> tcp_time_stamp<span style="color: #8b6508;">;</span>
+<span class="linenr">22:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-9" class="outline-5">
+<h5 id="sec-7-4-1-9"><span class="section-number-5">7.4.1.9</span> pkts_acked</h5>
+<div class="outline-text-5" id="text-7-4-1-9">
+
+<p>     当发送方接收到ACK后，　有段被确认时，此接口被调用。参数num_acked为此次ACK确认的段数。<br/>
+</p><ul>
+<li>调用时机:<br/>
+</li>
+</ul>
+
+<p>     tcp_input.c:3296:      if (ca_ops-&gt;pkts_acked) {<br/>
+     tcp_input.c:3311:          ca_ops-&gt;pkts_acked(sk, pkts_acked, rtt_us);<br/>
+</p><ul>
+<li>tcp_clean_rtx_queue()       <br/>
+</li>
+</ul>
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">tcp_clean_rtx_queue</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">int</span> <span style="color: #a0522d;">prior_fackets</span><span style="color: #8b6508;">,</span>
+<span class="linenr"> 2:  </span>                  <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">prior_snd_una</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 3:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 4:  </span><span style="color: #8b6508;">.........</span>
+<span class="linenr"> 5:  </span>       <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>ca_ops<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">pkts_acked</span><span style="color: #cd2626;">)</span> <span style="color: #cd2626;">{</span>
+<span class="linenr"> 6:  </span>           <span style="color: #228b22;">s32</span> <span style="color: #a0522d;">rtt_us</span> <span style="color: #8b6508;">=</span> <span style="color: #8b6508;">-</span><span style="color: #ff0000;">1</span><span style="color: #8b6508;">;</span>
+<span class="linenr"> 7:  </span>
+<span class="linenr"> 8:  </span>           <span style="color: #b22222;">/* </span><span style="color: #b22222;">Is the ACK triggering packet unambiguous? </span><span style="color: #b22222;">*/</span>
+<span class="linenr"> 9:  </span>           <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>!<span style="color: #cd2626;">(</span>flag <span style="color: #8b6508;">&amp;</span> FLAG_RETRANS_DATA_ACKED<span style="color: #cd2626;">))</span> <span style="color: #cd2626;">{</span>
+<span class="linenr">10:  </span>               <span style="color: #b22222;">/* </span><span style="color: #b22222;">High resolution needed and available? </span><span style="color: #b22222;">*/</span>
+<span class="linenr">11:  </span>               <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>ca_ops<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">flags</span> <span style="color: #8b6508;">&amp;</span> TCP_CONG_RTT_STAMP <span style="color: #8b6508;">&amp;&amp;</span>
+<span class="linenr">12:  </span>                   !<span style="color: #008000; font-weight: bold;">ktime_equal</span><span style="color: #cd2626;">(</span>last_ackt<span style="color: #8b6508;">,</span>
+<span class="linenr">13:  </span>                        <span style="color: #008000; font-weight: bold;">net_invalid_timestamp</span><span style="color: #cd2626;">()))</span>
+<span class="linenr">14:  </span>                   rtt_us <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">ktime_us_delta</span><span style="color: #cd2626;">(</span><span style="color: #008000; font-weight: bold;">ktime_get_real</span><span style="color: #cd2626;">()</span><span style="color: #8b6508;">,</span>
+<span class="linenr">15:  </span>                               last_ackt<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">16:  </span>               <span style="color: #a020f0;">else</span> <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>ca_seq_rtt <span style="color: #8b6508;">&gt;=</span> <span style="color: #ff0000;">0</span><span style="color: #cd2626;">)</span>
+<span class="linenr">17:  </span>                   rtt_us <span style="color: #8b6508;">=</span> <span style="color: #008000; font-weight: bold;">jiffies_to_usecs</span><span style="color: #cd2626;">(</span>ca_seq_rtt<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">18:  </span>           <span style="color: #cd2626;">}</span>
+<span class="linenr">19:  </span>
+<span class="linenr">20:  </span>           ca_ops<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">pkts_acked</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> pkts_acked<span style="color: #8b6508;">,</span> rtt_us<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">21:  </span>       <span style="color: #cd2626;">}</span>
+<span class="linenr">22:  </span><span style="color: #8b6508;">.........</span>      
+<span class="linenr">23:  </span><span style="color: #cd2626;">}</span>      
+</pre>
+
+</p>
+<p>     <br/>
+</p></div>
+
+</div>
+
+<div id="outline-container-7-4-1-10" class="outline-5">
+<h5 id="sec-7-4-1-10"><span class="section-number-5">7.4.1.10</span> get_info</h5>
+<div class="outline-text-5" id="text-7-4-1-10">
+
+<p>     提供给inet_diag的获取信息接口。<br/>
+     调用时机:<br/>
+       inet_diag.c:168:     icsk-&gt;icsk_ca_ops &amp;&amp; icsk-&gt;icsk_ca_ops-&gt;get_info)<br/>
+       inet_diag.c:169:     icsk-&gt;icsk_ca_ops-&gt;get_info(sk, ext, skb);   <br/>
+</p><ul>
+<li>inet_csk_diag_fill()<br/>
+</li>
+</ul>
+
+
+<p><br/>
+<pre class="src src-c"><span class="linenr"> 1:  </span><span style="color: #a020f0;">static</span> <span style="color: #228b22;">int</span> <span style="color: #0000ff; font-size: 120%;">inet_csk_diag_fill</span><span style="color: #cd2626;">(</span><span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sock</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">sk</span><span style="color: #8b6508;">,</span>
+<span class="linenr"> 2:  </span>                 <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">sk_buff</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">skb</span><span style="color: #8b6508;">,</span>
+<span class="linenr"> 3:  </span>                 <span style="color: #228b22;">int</span> <span style="color: #a0522d;">ext</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">pid</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u32</span> <span style="color: #a0522d;">seq</span><span style="color: #8b6508;">,</span> <span style="color: #228b22;">u16</span> <span style="color: #a0522d;">nlmsg_flags</span><span style="color: #8b6508;">,</span>
+<span class="linenr"> 4:  </span>                 <span style="color: #a020f0;">const</span> <span style="color: #a020f0;">struct</span> <span style="color: #228b22;">nlmsghdr</span> <span style="color: #8b6508;">*</span><span style="color: #a0522d;">unlh</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 5:  </span><span style="color: #cd2626;">{</span>
+<span class="linenr"> 6:  </span><span style="color: #8b6508;">.........</span>   
+<span class="linenr"> 7:  </span>   <span style="color: #a020f0;">if</span> <span style="color: #cd2626;">(</span>sk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">sk_state</span> <span style="color: #8b6508;">&lt;</span> TCP_TIME_WAIT <span style="color: #8b6508;">&amp;&amp;</span>
+<span class="linenr"> 8:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span> <span style="color: #8b6508;">&amp;&amp;</span> icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">get_info</span><span style="color: #cd2626;">)</span>
+<span class="linenr"> 9:  </span>       icsk<span style="color: #008b45;">-&gt;</span><span style="color: #008000;">icsk_ca_ops</span><span style="color: #008b45;">-&gt;</span><span style="color: #008000;">get_info</span><span style="color: #cd2626;">(</span>sk<span style="color: #8b6508;">,</span> ext<span style="color: #8b6508;">,</span> skb<span style="color: #cd2626;">)</span><span style="color: #8b6508;">;</span>
+<span class="linenr">10:  </span><span style="color: #8b6508;">.........</span>
+<span class="linenr">11:  </span><span style="color: #cd2626;">}</span>
+</pre>
+
+</p>
+<p>   <br/>
+</p></div>
+</div>
+</div>
+
+</div>
+
+<div id="outline-container-7-5" class="outline-3">
+<h3 id="sec-7-5"><span class="section-number-3">7.5</span> 慢启动</h3>
+<div class="outline-text-3" id="text-7-5">
+
+
+</div>
+
+<div id="outline-container-7-5-1" class="outline-4">
+<h4 id="sec-7-5-1"><span class="section-number-4">7.5.1</span> 连接建立时</h4>
+<div class="outline-text-4" id="text-7-5-1">
 
 <p>    在建立连接时，做为服务器端会通过tcp_v4_do_rcv（）－－》tcp_v4_hnd_req（）－－》tcp_che <br/>
     ck_req（）－－－》inet_csk(sk)-&gt;icsk_af_ops-&gt;syn_recv_sock（） <br/>
@@ -2011,9 +2612,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-2" class="outline-4">
-<h4 id="sec-7-4-2"><span class="section-number-4">7.4.2</span> tcp_ack()</h4>
-<div class="outline-text-4" id="text-7-4-2">
+<div id="outline-container-7-5-2" class="outline-4">
+<h4 id="sec-7-5-2"><span class="section-number-4">7.5.2</span> tcp_ack()</h4>
+<div class="outline-text-4" id="text-7-5-2">
 
 <p>    这个函数主要功能是： <br/>
     1 update重传队列，并基于sack来设置skb的相关buf。 <br/>
@@ -2023,9 +2624,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-3" class="outline-4">
-<h4 id="sec-7-4-3"><span class="section-number-4">7.4.3</span> 拥塞控制入口</h4>
-<div class="outline-text-4" id="text-7-4-3">
+<div id="outline-container-7-5-3" class="outline-4">
+<h4 id="sec-7-5-3"><span class="section-number-4">7.5.3</span> 拥塞控制入口</h4>
+<div class="outline-text-4" id="text-7-5-3">
 
 <p>    每接收到一个传输数据包的响应ack包进入tcp_cong_avoid()中判读该进行慢启动还是拥塞避免处理流程。<br/>
 </p>
@@ -2051,9 +2652,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-4" class="outline-4">
-<h4 id="sec-7-4-4"><span class="section-number-4">7.4.4</span> snd_ssthresh设置</h4>
-<div class="outline-text-4" id="text-7-4-4">
+<div id="outline-container-7-5-4" class="outline-4">
+<h4 id="sec-7-5-4"><span class="section-number-4">7.5.4</span> snd_ssthresh设置</h4>
+<div class="outline-text-4" id="text-7-5-4">
 
 <p>    这个值在加载cubic模块的时候可以传递一个我们制定的值给它，不过，默认是很大的值，我这里是2147483647,然后在接收ack期间(slow start)期间会调整这个值，<br/>
     在cubic中，默认是16（一般来说说当拥塞窗口到达16的时候，snd_ssthresh会被设置为16).<br/>
@@ -2108,18 +2709,18 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-5" class="outline-4">
-<h4 id="sec-7-4-5"><span class="section-number-4">7.4.5</span> snd_cwnd_clamp设置</h4>
-<div class="outline-text-4" id="text-7-4-5">
+<div id="outline-container-7-5-5" class="outline-4">
+<h4 id="sec-7-5-5"><span class="section-number-4">7.5.5</span> snd_cwnd_clamp设置</h4>
+<div class="outline-text-4" id="text-7-5-5">
 
 <p>    关于snd_cwnd_clamp变量，在《linux内核源码剖析——TCP/IP实现（下册）》p717，讲到：snd_cwnd_clamp是允许的拥塞窗口最大值，初始值为65535，之后再接收SYN和ACK段时，<br/>
     会根据条件确定是否从路由配置项读取信息更新该字段，最后在TCP连接复位前，将更新后的值根据某种算法计算后再更新回相对应的路由配置项中，便于连接使用。<br/>
 </p>
 </div>
 
-<div id="outline-container-7-4-5-1" class="outline-5">
-<h5 id="sec-7-4-5-1"><span class="section-number-5">7.4.5.1</span> 初始值后第一次修改</h5>
-<div class="outline-text-5" id="text-7-4-5-1">
+<div id="outline-container-7-5-5-1" class="outline-5">
+<h5 id="sec-7-5-5-1"><span class="section-number-5">7.5.5.1</span> 初始值后第一次修改</h5>
+<div class="outline-text-5" id="text-7-5-5-1">
 
 <p>     啥时候第一次修改的路由配置项还不清楚。<br/>
 </p>
@@ -2128,9 +2729,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-5-2" class="outline-5">
-<h5 id="sec-7-4-5-2"><span class="section-number-5">7.4.5.2</span> 连接复位前更新</h5>
-<div class="outline-text-5" id="text-7-4-5-2">
+<div id="outline-container-7-5-5-2" class="outline-5">
+<h5 id="sec-7-5-5-2"><span class="section-number-5">7.5.5.2</span> 连接复位前更新</h5>
+<div class="outline-text-5" id="text-7-5-5-2">
 
 <ul>
 <li>客户端<br/>
@@ -2223,9 +2824,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-6" class="outline-4">
-<h4 id="sec-7-4-6"><span class="section-number-4">7.4.6</span> 拥塞控制实现</h4>
-<div class="outline-text-4" id="text-7-4-6">
+<div id="outline-container-7-5-6" class="outline-4">
+<h4 id="sec-7-5-6"><span class="section-number-4">7.5.6</span> 拥塞控制实现</h4>
+<div class="outline-text-4" id="text-7-5-6">
 
 
 <p><br/>
@@ -2257,9 +2858,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-7" class="outline-4">
-<h4 id="sec-7-4-7"><span class="section-number-4">7.4.7</span> 慢启动算法</h4>
-<div class="outline-text-4" id="text-7-4-7">
+<div id="outline-container-7-5-7" class="outline-4">
+<h4 id="sec-7-5-7"><span class="section-number-4">7.5.7</span> 慢启动算法</h4>
+<div class="outline-text-4" id="text-7-5-7">
 
 
     <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
@@ -2307,9 +2908,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-4-8" class="outline-4">
-<h4 id="sec-7-4-8"><span class="section-number-4">7.4.8</span> 备注</h4>
-<div class="outline-text-4" id="text-7-4-8">
+<div id="outline-container-7-5-8" class="outline-4">
+<h4 id="sec-7-5-8"><span class="section-number-4">7.5.8</span> 备注</h4>
+<div class="outline-text-4" id="text-7-5-8">
 
 <p>    这里着重解释一下，cwnd的指数增长是如何进行的，所有的文献中都会提到，cwnd在一个RTT内会翻倍，这里看到的源码似乎不是这样，而是接收一个ACK就加一。<br/>
     这里疑惑了一下，接收一个ACK的时间不就是RTT吗？其实不是的，一个cwnd内的包是一起发送的，之间相关的时间很短，只和带宽有关，ACK也是连续返回的，<br/>
@@ -2321,16 +2922,16 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-5" class="outline-3">
-<h3 id="sec-7-5"><span class="section-number-3">7.5</span> 拥塞避免</h3>
-<div class="outline-text-3" id="text-7-5">
+<div id="outline-container-7-6" class="outline-3">
+<h3 id="sec-7-6"><span class="section-number-3">7.6</span> 拥塞避免</h3>
+<div class="outline-text-3" id="text-7-6">
 
 
 </div>
 
-<div id="outline-container-7-5-1" class="outline-4">
-<h4 id="sec-7-5-1"><span class="section-number-4">7.5.1</span> 拥塞避免算法</h4>
-<div class="outline-text-4" id="text-7-5-1">
+<div id="outline-container-7-6-1" class="outline-4">
+<h4 id="sec-7-6-1"><span class="section-number-4">7.6.1</span> 拥塞避免算法</h4>
+<div class="outline-text-4" id="text-7-6-1">
 
 <p>    通过判断当前的拥塞窗口下已经发送的数据段的个数是否大于算法计算出来的值w，如果大于我们才能增加拥塞窗口值，否则之需要增加snd_cwnd_cnt。<br/>
 </p>
@@ -2354,9 +2955,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-6" class="outline-3">
-<h3 id="sec-7-6"><span class="section-number-3">7.6</span> 快速重传</h3>
-<div class="outline-text-3" id="text-7-6">
+<div id="outline-container-7-7" class="outline-3">
+<h3 id="sec-7-7"><span class="section-number-3">7.7</span> 快速重传</h3>
+<div class="outline-text-3" id="text-7-7">
 
 <p>   快速重传：tcp_ack中的丢包检测，即检测到连续3个重复ACK。<br/>
    超时重传是TCP协议保证数据可靠性的一个重要机制，其原理是在发送一个数据以后就开启一个计时器，<br/>
@@ -2370,9 +2971,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-6-1" class="outline-4">
-<h4 id="sec-7-6-1"><span class="section-number-4">7.6.1</span> 快速重传做的事情有：</h4>
-<div class="outline-text-4" id="text-7-6-1">
+<div id="outline-container-7-7-1" class="outline-4">
+<h4 id="sec-7-7-1"><span class="section-number-4">7.7.1</span> 快速重传做的事情有：</h4>
+<div class="outline-text-4" id="text-7-7-1">
 
 <ol>
 <li>把ssthresh设置为cwnd的一半<br/>
@@ -2387,9 +2988,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-6-2" class="outline-4">
-<h4 id="sec-7-6-2"><span class="section-number-4">7.6.2</span> 第一个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-6-2">
+<div id="outline-container-7-7-2" class="outline-4">
+<h4 id="sec-7-7-2"><span class="section-number-4">7.7.2</span> 第一个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-7-2">
 
 <p>    现在的TCP协议中默认都是支持SACK,FACK,D-SACK的 。用sysctl -a|grep ack 就可知道。 <br/>
     但具体到一个连接的支持情况还要看三次握手，只要双方都支持了SACK，FACK就会自动打开，只有有一方不支持SACK，连接就处于最基本的reno方法的拥塞控制。 <br/>
@@ -2562,9 +3163,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-6-3" class="outline-4">
-<h4 id="sec-7-6-3"><span class="section-number-4">7.6.3</span> 第2个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-6-3">
+<div id="outline-container-7-7-3" class="outline-4">
+<h4 id="sec-7-7-3"><span class="section-number-4">7.7.3</span> 第2个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-7-3">
 
 <p>   在不增加窗口大小的情况下，本ACK包还是会通过FASTPATH进入tcp_ack()函数。在增加了sacked_out后与第一个重复的ACK一样就返回了。 <br/>
 </p>
@@ -2573,9 +3174,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-6-4" class="outline-4">
-<h4 id="sec-7-6-4"><span class="section-number-4">7.6.4</span> 第3个重复的ACK</h4>
-<div class="outline-text-4" id="text-7-6-4">
+<div id="outline-container-7-7-4" class="outline-4">
+<h4 id="sec-7-7-4"><span class="section-number-4">7.7.4</span> 第3个重复的ACK</h4>
+<div class="outline-text-4" id="text-7-7-4">
 
 <p>   该ACK包与前2个包不同之处是：这个包要更新拥塞控制的状态了，这个就是经典的RENO：3个重复ACK引发重传。<br/>
     <div style="height:400px;overflow:auto;border-style:solid;border-width:1px">
@@ -2722,9 +3323,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-7" class="outline-3">
-<h3 id="sec-7-7"><span class="section-number-3">7.7</span> 快速恢复</h3>
-<div class="outline-text-3" id="text-7-7">
+<div id="outline-container-7-8" class="outline-3">
+<h3 id="sec-7-8"><span class="section-number-3">7.8</span> 快速恢复</h3>
+<div class="outline-text-3" id="text-7-8">
 
 <p>   后来的“快速恢复”算法是在上述的“快速重传”算法后添加的，当收到3个重复ACK时，TCP最后进入的不是拥塞避免阶段，而是快速恢复阶段。<br/>
    快速重传和快速恢复算法一般同时使用。快速恢复的思想是“数据包守恒”原则，即同一个时刻在网络中的数据包数量是恒定的，只有当“老”数<br/>
@@ -2733,9 +3334,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-7-1" class="outline-4">
-<h4 id="sec-7-7-1"><span class="section-number-4">7.7.1</span> 具体来说快速恢复的主要步骤是：</h4>
-<div class="outline-text-4" id="text-7-7-1">
+<div id="outline-container-7-8-1" class="outline-4">
+<h4 id="sec-7-8-1"><span class="section-number-4">7.8.1</span> 具体来说快速恢复的主要步骤是：</h4>
+<div class="outline-text-4" id="text-7-8-1">
 
 <ol>
 <li>当收到3个重复ACK时，把ssthresh设置为cwnd的一半，把cwnd设置为ssthresh的值加3，然后重传丢失的报文段，加3的原因是因为<br/>
@@ -2758,16 +3359,16 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8" class="outline-3">
-<h3 id="sec-7-8"><span class="section-number-3">7.8</span> 拥塞状态机</h3>
-<div class="outline-text-3" id="text-7-8">
+<div id="outline-container-7-9" class="outline-3">
+<h3 id="sec-7-9"><span class="section-number-3">7.9</span> 拥塞状态机</h3>
+<div class="outline-text-3" id="text-7-9">
 
 
 </div>
 
-<div id="outline-container-7-8-1" class="outline-4">
-<h4 id="sec-7-8-1"><span class="section-number-4">7.8.1</span> 进入条件</h4>
-<div class="outline-text-4" id="text-7-8-1">
+<div id="outline-container-7-9-1" class="outline-4">
+<h4 id="sec-7-9-1"><span class="section-number-4">7.9.1</span> 进入条件</h4>
+<div class="outline-text-4" id="text-7-9-1">
 
 <p>　拥塞状态机处理最主要的函数就是tcp_fastretrans_alert，进入这个函数的条件:<br/>
 　- each incoming ACK, if state is not “Open”(每个处于非OPEN状态的ack包)<br/>
@@ -2789,9 +3390,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-2" class="outline-4">
-<h4 id="sec-7-8-2"><span class="section-number-4">7.8.2</span> 状态机实现</h4>
-<div class="outline-text-4" id="text-7-8-2">
+<div id="outline-container-7-9-2" class="outline-4">
+<h4 id="sec-7-9-2"><span class="section-number-4">7.9.2</span> 状态机实现</h4>
+<div class="outline-text-4" id="text-7-9-2">
 
 <p>  在tcp_ack()中调用的，进入这个函数就意味着我们碰到了拥塞状态或者在拥塞状态处理tcp。在这个函数中，实现了下面的这些算法： <br/>
   1 失败重传。 <br/>
@@ -3309,9 +3910,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-8-3" class="outline-4">
-<h4 id="sec-7-8-3"><span class="section-number-4">7.8.3</span> 退出条件</h4>
-<div class="outline-text-4" id="text-7-8-3">
+<div id="outline-container-7-9-3" class="outline-4">
+<h4 id="sec-7-9-3"><span class="section-number-4">7.9.3</span> 退出条件</h4>
+<div class="outline-text-4" id="text-7-9-3">
 
 <p>   各状态的退出时机：tp-&gt;snd_una &gt;= tp-&gt;high_seq<br/>
 </p>
@@ -3365,9 +3966,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9" class="outline-3">
-<h3 id="sec-7-9"><span class="section-number-3">7.9</span> 拥塞事件</h3>
-<div class="outline-text-3" id="text-7-9">
+<div id="outline-container-7-10" class="outline-3">
+<h3 id="sec-7-10"><span class="section-number-3">7.10</span> 拥塞事件</h3>
+<div class="outline-text-3" id="text-7-10">
 
 <p>　　　TCP定义了几个拥塞事件，当这些事件发生时，我们可以通过TCP的拥塞控制算法，调用自定义的处理函数，<br/>
 　　　来做一些额外的事情的。也就是说，我们可以很简便的参与到TCP对拥塞事件的处理过程中。<br/>
@@ -3375,9 +3976,9 @@ for the JavaScript code in this tag.
 </p>
 </div>
 
-<div id="outline-container-7-9-1" class="outline-4">
-<h4 id="sec-7-9-1"><span class="section-number-4">7.9.1</span> TCP的拥塞事件集</h4>
-<div class="outline-text-4" id="text-7-9-1">
+<div id="outline-container-7-10-1" class="outline-4">
+<h4 id="sec-7-10-1"><span class="section-number-4">7.10.1</span> TCP的拥塞事件集</h4>
+<div class="outline-text-4" id="text-7-10-1">
 
 
 <p><br/>
@@ -3399,9 +4000,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-2" class="outline-4">
-<h4 id="sec-7-9-2"><span class="section-number-4">7.9.2</span> 钩子函数定义</h4>
-<div class="outline-text-4" id="text-7-9-2">
+<div id="outline-container-7-10-2" class="outline-4">
+<h4 id="sec-7-10-2"><span class="section-number-4">7.10.2</span> 钩子函数定义</h4>
+<div class="outline-text-4" id="text-7-10-2">
 
 
 <p><br/>
@@ -3419,9 +4020,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-3" class="outline-4">
-<h4 id="sec-7-9-3"><span class="section-number-4">7.9.3</span> 封装调用</h4>
-<div class="outline-text-4" id="text-7-9-3">
+<div id="outline-container-7-10-3" class="outline-4">
+<h4 id="sec-7-10-3"><span class="section-number-4">7.10.3</span> 封装调用</h4>
+<div class="outline-text-4" id="text-7-10-3">
 
 
 <p><br/>
@@ -3439,9 +4040,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-4" class="outline-4">
-<h4 id="sec-7-9-4"><span class="section-number-4">7.9.4</span> CA_EVENT_TX_START</h4>
-<div class="outline-text-4" id="text-7-9-4">
+<div id="outline-container-7-10-4" class="outline-4">
+<h4 id="sec-7-10-4"><span class="section-number-4">7.10.4</span> CA_EVENT_TX_START</h4>
+<div class="outline-text-4" id="text-7-10-4">
 
 <p>　　　当发送一个数据包时，如果网络中无发送且未确认的数据包，则触发此事件。<br/>
 </p>
@@ -3465,9 +4066,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-5" class="outline-4">
-<h4 id="sec-7-9-5"><span class="section-number-4">7.9.5</span> CA_EVENT_CWND_RESTART</h4>
-<div class="outline-text-4" id="text-7-9-5">
+<div id="outline-container-7-10-5" class="outline-4">
+<h4 id="sec-7-10-5"><span class="section-number-4">7.10.5</span> CA_EVENT_CWND_RESTART</h4>
+<div class="outline-text-4" id="text-7-10-5">
 
 <p>　　　发送方在发送数据包时，如果发送的数据包有负载，则会检测拥塞窗口是否超时。<br/>
 　　　如果超时，则会使拥塞窗口失效并重新计算拥塞窗口，同时触发CA_EVENT_CWND_RESTART事件。<br/>
@@ -3526,9 +4127,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-6" class="outline-4">
-<h4 id="sec-7-9-6"><span class="section-number-4">7.9.6</span> CA_EVENT_COMPLETE_CWR</h4>
-<div class="outline-text-4" id="text-7-9-6">
+<div id="outline-container-7-10-6" class="outline-4">
+<h4 id="sec-7-10-6"><span class="section-number-4">7.10.6</span> CA_EVENT_COMPLETE_CWR</h4>
+<div class="outline-text-4" id="text-7-10-6">
 
 <p>　　　当退出CWR状态，或者退出Recovery状态时，会调用tcp_complete_cwr()来设置拥塞窗口，这个时候<br/>
 　　　会触发CA_EVENT_COMPLETE_CWR来通知拥塞控制模块：“我已经停止减小拥塞窗口了！如果你想<br/>
@@ -3558,9 +4159,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-7" class="outline-4">
-<h4 id="sec-7-9-7"><span class="section-number-4">7.9.7</span> CA_EVENT_FRTO</h4>
-<div class="outline-text-4" id="text-7-9-7">
+<div id="outline-container-7-10-7" class="outline-4">
+<h4 id="sec-7-10-7"><span class="section-number-4">7.10.7</span> CA_EVENT_FRTO</h4>
+<div class="outline-text-4" id="text-7-10-7">
 
 <p>　　　启用F-RTO时，发生超时后，首先会进行F-RTO处理，看看这个超时是不是虚假的，如果不是的话<br/>
 　　　再进行传统的超时重传。这时候会减小慢启动阈值，而拥塞窗口暂时保持不变。<br/>
@@ -3603,9 +4204,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-8" class="outline-4">
-<h4 id="sec-7-9-8"><span class="section-number-4">7.9.8</span> CA_EVENT_LOSS</h4>
-<div class="outline-text-4" id="text-7-9-8">
+<div id="outline-container-7-10-8" class="outline-4">
+<h4 id="sec-7-10-8"><span class="section-number-4">7.10.8</span> CA_EVENT_LOSS</h4>
+<div class="outline-text-4" id="text-7-10-8">
 
 <p>　　　上面我们说到，如果超时不是虚假的话，就会进入超时重传，也就是TCP_CA_Loss状态。<br/>
 </p>
@@ -3645,9 +4246,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-9" class="outline-4">
-<h4 id="sec-7-9-9"><span class="section-number-4">7.9.9</span> CA_EVENT_FAST_ACK</h4>
-<div class="outline-text-4" id="text-7-9-9">
+<div id="outline-container-7-10-9" class="outline-4">
+<h4 id="sec-7-10-9"><span class="section-number-4">7.10.9</span> CA_EVENT_FAST_ACK</h4>
+<div class="outline-text-4" id="text-7-10-9">
 
 <p>　　　如果我们收到符合预期的ACK，那么就进入快速路径的处理流程，在tcp_ack()中进行负荷无关的处理，<br/>
 　　　同时触发CA_EVENT_FAST_ACK事件。<br/>
@@ -3679,9 +4280,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-10" class="outline-4">
-<h4 id="sec-7-9-10"><span class="section-number-4">7.9.10</span> CA_EVENT_SLOW_ACK</h4>
-<div class="outline-text-4" id="text-7-9-10">
+<div id="outline-container-7-10-10" class="outline-4">
+<h4 id="sec-7-10-10"><span class="section-number-4">7.10.10</span> CA_EVENT_SLOW_ACK</h4>
+<div class="outline-text-4" id="text-7-10-10">
 
 <p>　　　如果我们收到不符合预期的ACK，那么就不能走快速路径，而必须经过全面的检查，即进入慢速路径的<br/>
 　　　处理流程。同样在tcp_ack()中进行负荷无关的处理，同时触发CA_EVENT_SLOW_ACK事件。<br/>
@@ -3721,9 +4322,9 @@ for the JavaScript code in this tag.
 
 </div>
 
-<div id="outline-container-7-9-11" class="outline-4">
-<h4 id="sec-7-9-11"><span class="section-number-4">7.9.11</span> 阈值的设置</h4>
-<div class="outline-text-4" id="text-7-9-11">
+<div id="outline-container-7-10-11" class="outline-4">
+<h4 id="sec-7-10-11"><span class="section-number-4">7.10.11</span> 阈值的设置</h4>
+<div class="outline-text-4" id="text-7-10-11">
 
 <p>　　　用拥塞算法的ssthresh()来设置慢启动阈值tp-&gt;snd_ssthresh。<br/>
 　　　（1）tcp_enter_cwr<br/>
@@ -3852,7 +4453,7 @@ for the JavaScript code in this tag.
 </div>
 
 <div id="postamble">
-<p class="date">Date: 2014-10-21T09:58+0800</p>
+<p class="date">Date: 2014-10-30T11:34+0800</p>
 <p class="author">Author: mosp</p>
 <p class="creator"><a href="http://orgmode.org">Org</a> version 7.9.3f with <a href="http://www.gnu.org/software/emacs/">Emacs</a> version 24</p>
 <a href="http://validator.w3.org/check?uri=referer">Validate XHTML 1.0</a>
